@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "awake",
+  "version": "0.1.0",
+  "identifier": "com.awake.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "awake",
+        "width": 800,
+        "height": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons-on/32x32.png",
+      "icons-on/128x128.png",
+      "icons-on/128x128@2x.png",
+      "icons-on/icon.icns",
+      "icons-on/icon.ico"
+    ]
+  }
+}
