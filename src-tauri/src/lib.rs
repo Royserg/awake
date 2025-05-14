@@ -28,6 +28,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Hide the main window
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            } else {
+                // We should not care as long as app is running
+                eprintln!("Main window not found, could not hide it.");
+            }
+
             app.manage(Mutex::new(
                 AppState {
                     no_sleep: NoSleep::new().unwrap(),
