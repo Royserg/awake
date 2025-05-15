@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Awake - Keep Your Computer Awake</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        :root {
+            --pixel-size: 18px;
+            --bg-color: #23272e;
+            --grid-color: #fff;
+            --landscape-layers: 4;
+        }
+
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background: var(--bg-color);
+            color: var(--grid-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            text-align: center;
+            overflow-x: hidden;
+            image-rendering: pixelated;
+        }
+
+        .pixel-landscape {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            pointer-events: none;
+            background: linear-gradient(135deg, #23272e 0%, #1a1e24 100%);
+            overflow: hidden;
+        }
+
+        .pixel-landscape::before {
+            content: "";
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background-image: 
+                linear-gradient(45deg, rgba(255,255,255,0.05) 0%, transparent 50%),
+                linear-gradient(-45deg, rgba(255,255,255,0.03) 0%, transparent 50%);
+            background-size: 60px 60px;
+            transform: rotate(15deg);
+            animation: bgMove 60s linear infinite;
+        }
+
+        @keyframes bgMove {
+            0% { transform: rotate(15deg) translateX(0); }
+            100% { transform: rotate(15deg) translateX(-60px); }
+        }
+
+        .container {
+            padding: 40px;
+            background-color: rgba(35, 39, 46, 0.7);
+            border-radius: 12px;
+            position: relative;
+            z-index: 1;
+            margin: 20px;
+            max-width: 500px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .pixel-layer {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+
+        .pixel {
+            position: absolute;
+            width: var(--pixel-size);
+            height: var(--pixel-size);
+            background: #fff;
+            opacity: 0.15;
+            border-radius: 2px;
+            transition: opacity 0.4s, transform 0.6s cubic-bezier(.22,1,.36,1);
+        }
+
+        .container {
+            padding: 30px;
+            background-color: rgba(35, 39, 46, 0.9); /* More opaque background */
+            border-radius: 18px;
+            position: relative;
+            z-index: 1;
+            margin: 20px;
+            max-width: 500px;
+            box-shadow: 0 4px 32px 0 rgba(0,0,0,0.25);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            color: #fff;
+            text-shadow: 2px 2px 8px #000;
+        }
+
+        p {
+            font-size: 0.9em;
+            line-height: 1.8;
+            margin-bottom: 30px;
+            color: #f3f6fa;
+        }
+        .real-logo {
+            width: 160px;
+            height: 160px;
+            margin: 20px auto 30px;
+            background-image: url('./src-tauri/icons/icon.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        .download-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .main-download {
+            display: inline-block;
+            padding: 15px 30px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1em;
+            color: var(--bg-color);
+            background-color: var(--grid-color);
+            border: 2px solid var(--grid-color);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 10px;
+        }
+
+        .main-download:hover {
+            transform: scale(1.05);
+        }
+
+        .main-download:active {
+            transform: scale(0.95);
+        }
+
+        .other-platforms-btn {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.7em;
+            color: var(--grid-color);
+            background-color: transparent;
+            border: none;
+            text-decoration: underline;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+
+        .other-platforms-btn:hover {
+            color: #aaa;
+        }
+
+        .other-downloads {
+            display: none;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .other-downloads.show {
+            display: flex;
+        }
+
+        .download-button {
+            display: inline-block;
+            padding: 10px 15px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.7em;
+            color: var(--bg-color);
+            background-color: var(--grid-color);
+            border: 2px solid var(--grid-color);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .download-button:hover {
+            background-color: var(--bg-color);
+            color: var(--grid-color);
+        }
+
+        .github-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: transparent;
+            border: 2px solid var(--grid-color);
+            color: var(--grid-color);
+            text-decoration: none;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.7em;
+            transition: all 0.2s;
+        }
+
+        .github-link:hover {
+            background-color: var(--grid-color);
+            color: var(--bg-color);
+        }
+
+        .github-pixel-icon {
+            display: inline-grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 24px;
+            height: 24px;
+            margin-right: 10px;
+        }
+
+        .github-pixel {
+            width: 100%;
+            height: 100%;
+            background-color: var(--grid-color);
+        }
+
+        .github-pixel.empty {
+            background-color: transparent;
+        }
+
+    .hero-pixelated {
+        position: relative;
+        overflow: visible;
+    }
+    
+    .pixel-hero, .pixel-hero-reflection {
+        position: absolute;
+        left: 50%;
+        top: 0;
+        transform: translateX(-50%);
+        width: 320px;
+        height: 120px;
+        display: grid;
+        grid-template-columns: repeat(20, 1fr);
+        grid-template-rows: repeat(6, 1fr);
+        z-index: 0;
+        pointer-events: none;
+    }
+    
+    .pixel-hero-reflection {
+        top: 120px;
+        transform: translateX(-50%) scaleY(-1);
+        opacity: 0.25;
+        filter: blur(1px);
+        mask-image: linear-gradient(to bottom, rgba(255,255,255,0.5), transparent 80%);
+    }
+    
+    .pixel-hero-pixel {
+        width: 100%;
+        height: 100%;
+        background: #fff;
+        opacity: 0.15;
+        border-radius: 2px;
+        transition: opacity 0.3s;
+    }
+    </style>
+</head>
+<body>
+    <div class="pixel-landscape" id="pixelLandscape"></div>
+    <div class="container">
+        <h1>Awake</h1>
+        <div class="real-logo" id="realLogo"></div>
+        <p>Util to keep system awake</p>
+    <div class="download-section">
+        <a href="#" id="mainDownload" class="main-download">Download for <span id="platformName">Your Platform</span></a>
+        <button id="otherPlatformsBtn" class="other-platforms-btn">Other platforms</button>
+        <div id="otherDownloads" class="other-downloads">
+            <a href="#windows" class="download-button" data-platform="windows">Windows</a>
+            <a href="#linux" class="download-button" data-platform="linux">Linux</a>
+            <a href="#macos-intel" class="download-button" data-platform="macos-intel">macOS Intel</a>
+            <a href="#macos-silicon" class="download-button" data-platform="macos-silicon">macOS Silicon</a>
+        </div>
+        <a href="https://github.com/yourusername/awake" class="github-link">
+            <div class="github-pixel-icon" id="githubIcon"></div>
+            <span>GitHub</span>
+        </a>
+    </div>
+    </div>
+    <script>
+        // --- LANDSCAPE PARALLAX PIXEL BACKGROUND ---
+        const landscape = document.getElementById('pixelLandscape');
+        const layers = 4;
+        const colors = [
+            "#2d343c", // farthest
+            "#3a4250",
+            "#495366",
+            "#5a6780"  // closest, brightest
+        ];
+        const pixelSize = 18;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        for (let l = 0; l < layers; l++) {
+            const layer = document.createElement('div');
+            layer.className = 'pixel-layer';
+            layer.style.zIndex = l;
+            layer.dataset.depth = l;
+            landscape.appendChild(layer);
+
+            // Place pixels in a "landscape" pattern (more at bottom, less at top)
+            const rows = Math.floor(height / pixelSize);
+            const cols = Math.floor(width / pixelSize);
+            for (let y = 0; y < rows; y++) {
+                // More pixels in lower rows for "ground", fewer in upper for "sky"
+                const density = Math.max(0.2, 1 - y / rows + l * 0.1);
+                for (let x = 0; x < cols; x++) {
+                    if (Math.random() < density * 0.12) {
+                        const pixel = document.createElement('div');
+                        pixel.className = 'pixel';
+                        pixel.style.left = `${x * pixelSize}px`;
+                        pixel.style.top = `${y * pixelSize}px`;
+                        pixel.style.background = colors[l];
+                        pixel.style.opacity = 0.12 + l * 0.13 + Math.random() * 0.08;
+                        layer.appendChild(pixel);
+                    }
+                }
+            }
+        }
+
+        // Parallax effect on mouse move
+        document.addEventListener('mousemove', (e) => {
+            const cx = e.clientX / width - 0.5;
+            const cy = e.clientY / height - 0.5;
+            document.querySelectorAll('.pixel-layer').forEach((layer, i) => {
+                const depth = (i + 1) / layers;
+                layer.style.transform = `translate(${cx * 40 * depth}px, ${cy * 40 * depth}px)`;
+            });
+        });
+
+        // --- GITHUB PIXEL ICON ---
+        const githubIcon = document.getElementById('githubIcon');
+        const githubPattern = [
+            [0,0,1,1,1,1,0,0],
+            [0,1,1,1,1,1,1,0],
+            [1,1,0,0,0,0,1,1],
+            [1,1,0,1,1,0,1,1],
+            [1,1,0,1,1,0,1,1],
+            [1,1,0,0,0,0,1,1],
+            [0,1,1,1,1,1,1,0],
+            [0,0,1,1,1,1,0,0]
+        ];
+        for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+                const pixel = document.createElement('div');
+                pixel.className = 'github-pixel' + (githubPattern[y][x] ? '' : ' empty');
+                githubIcon.appendChild(pixel);
+            }
+        }
+
+        // --- PLATFORM DETECTION ---
+        function detectOS() {
+            const userAgent = window.navigator.userAgent;
+            let detectedOS = "Unknown";
+            let downloadLink = "#";
+            // macOS detection
+            if (/Mac/.test(userAgent)) {
+                // Try to detect Apple Silicon
+                let isSilicon = false;
+                try {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl');
+                    const debugInfo = gl ? gl.getExtension('WEBGL_debug_renderer_info') : null;
+                    const renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '';
+                    if (renderer && renderer.includes('Apple')) isSilicon = true;
+                } catch {}
+                // Fallback: check for newer macOS versions
+                if (!isSilicon && /Mac OS X 1[1-9]/.test(userAgent)) isSilicon = true;
+                detectedOS = isSilicon ? "macOS Silicon" : "macOS Intel";
+                downloadLink = isSilicon ? "#macos-silicon" : "#macos-intel";
+            } else if (/Win/.test(userAgent)) {
+                detectedOS = "Windows";
+                downloadLink = "#windows";
+            } else if (/Linux|X11/.test(userAgent)) {
+                detectedOS = "Linux";
+                downloadLink = "#linux";
+            }
+            // Update main download button
+            document.getElementById('platformName').textContent = detectedOS;
+            document.getElementById('mainDownload').href = downloadLink;
+            // Hide the detected platform from other downloads
+            document.querySelectorAll('.download-button').forEach(btn => {
+                btn.style.display = (btn.dataset.platform === detectedOS.toLowerCase().replace(" ", "-")) ? 'none' : '';
+            });
+        }
+
+        // Toggle other platforms
+        document.getElementById('otherPlatformsBtn').addEventListener('click', () => {
+            document.getElementById('otherDownloads').classList.toggle('show');
+        });
+
+        window.addEventListener('DOMContentLoaded', detectOS);
+
+    // Add this after your landscape pixel creation code
+    
+    // Replace animateWakeWave() with this new random pixel animation
+    function animateRandomPixels() {
+        const layers = document.querySelectorAll('.pixel-layer');
+        const squareSize = 3; // Size of the square in pixels
+        const duration = 2000; // Duration between animations
+        
+        function animate() {
+            layers.forEach((layer, l) => {
+                const pixels = Array.from(layer.children);
+                if (pixels.length === 0) return;
+                
+                // Pick a random starting point
+                const startX = Math.floor(Math.random() * (Math.floor(width / pixelSize) - squareSize));
+                const startY = Math.floor(Math.random() * (Math.floor(height / pixelSize) - squareSize));
+                
+                // Light up a square area
+                pixels.forEach(pixel => {
+                    const px = parseInt(pixel.style.left, 10) / pixelSize;
+                    const py = parseInt(pixel.style.top, 10) / pixelSize;
+                    
+                    if (px >= startX && px < startX + squareSize && 
+                        py >= startY && py < startY + squareSize) {
+                        pixel.style.opacity = 0.8;
+                        setTimeout(() => {
+                            pixel.style.opacity = 0.12 + l * 0.13 + Math.random() * 0.08;
+                        }, 500);
+                    }
+                });
+            });
+            setTimeout(animate, duration);
+        }
+        animate();
+    }
+    
+    // Replace the wave animation call with:
+    animateRandomPixels();
+    // Pixelated hero grid and reflection
+    function createPixelHeroGrid(containerId, isReflection = false) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        for (let y = 0; y < 6; y++) {
+            for (let x = 0; x < 20; x++) {
+                const pixel = document.createElement('div');
+                pixel.className = 'pixel-hero-pixel';
+                // Add some random brightness for pixelation
+                pixel.style.opacity = 0.13 + Math.random() * 0.25;
+                // Optionally, add a blue/cyan tint for "awake" feel
+                if (Math.random() > 0.85) pixel.style.background = '#7fdfff';
+                container.appendChild(pixel);
+            }
+        }
+    }
+    createPixelHeroGrid('pixelHero');
+    createPixelHeroGrid('pixelHeroReflection', true);
+    </script>
+</body>
+</html>
