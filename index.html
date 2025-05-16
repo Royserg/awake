@@ -8,7 +8,6 @@
         body {
             margin: 0;
             overflow: hidden;
-            background: #f0f0f0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
@@ -19,8 +18,10 @@
             width: 100vw;
             height: 100vh;
             display: grid;
-            grid-template-columns: repeat(auto-fill, 100px);
-            grid-template-rows: repeat(auto-fill, 100px);
+            grid-template-columns: repeat(auto-fill, 80px);
+            grid-template-rows: repeat(auto-fill, 80px);
+            gap: 1px;
+            background: #e7e7e7;
             z-index: -1;
         }
 
@@ -28,41 +29,30 @@
             background: #e0e0e0;
             position: relative;
             overflow: hidden;
+            border: 1px solid #d0d0d0;
+        }
+
+        #moving-line {
+            position: absolute;
+            background: #000;
+            z-index: 1;
+            transition: all 0.5s ease-out;
+            pointer-events: none;
         }
 
         .tile::after {
             content: '';
             position: absolute;
-            background: #333;
-        }
-
-        /* Horizontal lines */
-        .tile::after {
-            width: 100%;
-            height: 2px;
-            bottom: 0;
-            left: 0;
-            transform: translateX(-100%);
-            animation: moveLine 5s linear infinite;
-        }
-
-        /* Vertical lines */
-        .tile:nth-child(odd)::after {
             width: 2px;
             height: 100%;
-            right: 0;
             top: 0;
-            transform: translateY(-100%);
-            animation: moveLine 7s linear infinite;
+            right: -1px;
+            background: #000;
         }
 
-        @keyframes moveLine {
-            0% {
-                transform: translateX(-100%);
-            }
-            100% {
-                transform: translateX(100%);
-            }
+        @keyframes moveLineV {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
         }
 
         .container {
@@ -72,7 +62,12 @@
             padding: 2rem;
             margin: 0 auto;
             text-align: center;
-            color: #333;
+            background: transparent;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
         }
 
         .logo {
@@ -85,31 +80,84 @@
             background-position: center;
         }
 
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-        }
-
-        p {
-            font-size: 1rem;
-            line-height: 1.5;
-            margin-bottom: 2rem;
-            color: #666;
-        }
-
-        .download-btn {
+        .main-download {
             display: inline-block;
-            padding: 0.75rem 1.5rem;
-            background: #333;
-            color: white;
+            padding: 15px 30px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 1em;
+            color: #23272e;
+            background-color: #fff;
+            border: none;
             text-decoration: none;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            z-index: 1;
             border-radius: 4px;
-            font-weight: 500;
-            transition: transform 0.2s ease;
+            box-shadow: 
+                0 4px 0 0 #d0d0d0,
+                0 8px 6px -2px rgba(0,0,0,0.2);
+            transform: translateY(-4px);
         }
 
-        .download-btn:hover {
+        .main-download:hover {
+            transform: translateY(-6px) scale(1.05);
+            box-shadow: 
+                0 6px 0 0 #d0d0d0,
+                0 12px 8px -2px rgba(0,0,0,0.3);
+        }
+
+        .main-download:active {
             transform: translateY(-2px);
+            box-shadow: 
+                0 2px 0 0 #d0d0d0,
+                0 4px 4px -2px rgba(0,0,0,0.1);
+        }
+
+        .main-download::after {
+            content: '';
+            position: absolute;
+            top: var(--mouse-y);
+            left: var(--mouse-x);
+            width: 0;
+            height: 0;
+            background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 70%);
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            animation: ripple 1s ease-out forwards;
+            transform: translate(-50%, -50%);
+            transition: width 0.5s ease-out, height 0.5s ease-out, opacity 0.5s ease-out;
+            opacity: 0;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(10);
+                opacity: 0;
+            }
+        }
+        .main-download::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 5px;
+            height: 5px;
+            background: rgba(255,255,255,0.5);
+            transform: translate(-50%, -50%) scale(0);
+            border-radius: 50%;
+            transition: transform 0.6s ease-out;
+            z-index: -1;
+        }
+
+        .main-download:hover::before {
+            transform: translate(-50%, -50%) scale(20);
+            opacity: 0;
         }
     </style>
 </head>
@@ -119,20 +167,34 @@
         <div class="logo"></div>
         <h1>Awake</h1>
         <p>Keep your computer awake when you need it</p>
-        <a href="#" class="download-btn">Download</a>
+        <a href="#" class="main-download">Download</a>
     </div>
     <script>
-        // Create tile grid
-        const tileSize = 100;
+        // Create optimized tile grid
+        const tileSize = 80;
         const tileFloor = document.getElementById('tileFloor');
-        const cols = Math.ceil(window.innerWidth / tileSize);
-        const rows = Math.ceil(window.innerHeight / tileSize);
+        const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+        const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+        const cols = Math.ceil(viewportWidth / tileSize) + 1;
+        const rows = Math.ceil(viewportHeight / tileSize) + 1;
         
+        tileFloor.style.gridTemplateColumns = `repeat(${cols}, ${tileSize}px)`;
+        tileFloor.style.gridTemplateRows = `repeat(${rows}, ${tileSize}px)`;
+        
+        // Create tiles
         for (let i = 0; i < cols * rows; i++) {
             const tile = document.createElement('div');
             tile.className = 'tile';
             tileFloor.appendChild(tile);
         }
+    
+        // Create single moving line
+        
+        document.querySelector('.main-download').addEventListener('mousemove', function(e) {
+            const rect = this.getBoundingClientRect();
+            this.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
+            this.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
+        });
     </script>
 </body>
 </html>
