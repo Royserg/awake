@@ -4,8 +4,26 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State,
+    Manager, State, WindowEvent,
 };
+
+#[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    // (MacOS) Hide from Dock when window is hidden
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+#[tauri::command]
+fn show_splash(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 #[tauri::command]
 fn activate(state: State<'_, Mutex<AppState>>) -> String {
@@ -35,21 +53,32 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            // Hide the main window
-            if let Some(window) = app.get_webview_window("main") {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
-            } else {
-                // We should not care as long as app is running
-                eprintln!("Main window not found, could not hide it.");
+                // (MacOS) Hide from Dock when window is closed
+                #[cfg(target_os = "macos")]
+                window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+                api.prevent_close();
             }
-
+            _ => {}
+        })
+        .setup(|app| {
             app.manage(Mutex::new(AppState {
                 no_sleep: NoSleep::new().unwrap(),
                 no_sleep_active: false,
             }));
 
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+
+            #[cfg(debug_assertions)]
+            let menu = {
+                let show_splash_i =
+                    MenuItem::with_id(app, "show_splash", "Show Splash", true, None::<&str>)?;
+                Menu::with_items(app, &[&show_splash_i, &quit_i])?
+            };
+
+            #[cfg(not(debug_assertions))]
             let menu = Menu::with_items(app, &[&quit_i])?;
 
             // icons
@@ -104,6 +133,13 @@ pub fn run() {
                     }
                 })
                 .on_menu_event(|app, e| match e.id.as_ref() {
+                    #[cfg(debug_assertions)]
+                    "show_splash" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
                     "quit" => {
                         app.exit(0);
                     }
@@ -113,7 +149,12 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![activate, deactivate])
+        .invoke_handler(tauri::generate_handler![
+            hide_window,
+            show_splash,
+            activate,
+            deactivate
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
