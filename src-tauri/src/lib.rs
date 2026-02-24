@@ -1,11 +1,19 @@
-use std::sync::Mutex;
 use nosleep::{NoSleep, NoSleepType};
-use tauri::{ image::Image, menu::{Menu, MenuItem}, tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent}, Manager, State};
+use std::sync::Mutex;
+use tauri::{
+    image::Image,
+    menu::{Menu, MenuItem},
+    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, State,
+};
 
 #[tauri::command]
 fn activate(state: State<'_, Mutex<AppState>>) -> String {
     let mut state = state.lock().unwrap();
-    state.no_sleep.start(NoSleepType::PreventUserIdleDisplaySleep).expect("Failed to start NoSleep");
+    state
+        .no_sleep
+        .start(NoSleepType::PreventUserIdleDisplaySleep)
+        .expect("Failed to start NoSleep");
     format!("activated")
 }
 
@@ -16,16 +24,16 @@ fn deactivate(state: State<'_, Mutex<AppState>>) -> String {
     format!("deactivated")
 }
 
-
 struct AppState {
     no_sleep_active: bool,
     no_sleep: NoSleep,
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Hide the main window
@@ -36,12 +44,10 @@ pub fn run() {
                 eprintln!("Main window not found, could not hide it.");
             }
 
-            app.manage(Mutex::new(
-                AppState {
-                    no_sleep: NoSleep::new().unwrap(),
-                    no_sleep_active: false,
-                }
-            ));
+            app.manage(Mutex::new(AppState {
+                no_sleep: NoSleep::new().unwrap(),
+                no_sleep_active: false,
+            }));
 
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit_i])?;
@@ -63,7 +69,7 @@ pub fn run() {
                         // MouseClick triggers 2 events: Up and Down one after another
                         // this prevents immediate switch back
                         if let MouseButtonState::Down = button_state {
-                           return;
+                            return;
                         };
 
                         let handle = tray.app_handle();
@@ -75,7 +81,8 @@ pub fn run() {
 
                         if !is_no_sleep_active {
                             // Activate
-                            state.no_sleep
+                            state
+                                .no_sleep
                                 .start(NoSleepType::PreventUserIdleDisplaySleep)
                                 .expect("Failed to start NoSleep");
 
@@ -86,9 +93,7 @@ pub fn run() {
                             state.no_sleep_active = true;
                         } else {
                             // Deactivate
-                            state.no_sleep
-                                .stop()
-                                .expect("Failed to stop NoSleep");
+                            state.no_sleep.stop().expect("Failed to stop NoSleep");
 
                             let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
                             let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
@@ -96,15 +101,13 @@ pub fn run() {
 
                             state.no_sleep_active = false;
                         }
-                     }
-                })
-                .on_menu_event(|app, e| {
-                    match e.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
+                })
+                .on_menu_event(|app, e| match e.id.as_ref() {
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
                 })
                 .build(app)?;
 

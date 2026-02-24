@@ -1,8 +1,24 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { invoke } from "@tauri-apps/api/core";
+  import { check } from '@tauri-apps/plugin-updater';
+  import { relaunch } from '@tauri-apps/plugin-process';
 
   type State = 'idle' | 'activated';
   let status = $state<State>('idle');
+
+  onMount(async () => {
+    try {
+      const update = await check();
+      if (update) {
+        console.log(`Update available: ${update.version}`);
+        await update.downloadAndInstall();
+        await relaunch();
+      }
+    } catch (error) {
+      console.error("Error checking for updates:", error);
+    }
+  });
 
   async function activate() {
     try {
