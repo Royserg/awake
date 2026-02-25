@@ -1,6 +1,6 @@
 # Awake
 
-Crossplatform (tested on Mac) app that prevents system from sleeping.
+Cross-platform (tested on Mac) app that prevents system from sleeping.
 
 ![app toggling](./docs/awake-toggling.gif)
 

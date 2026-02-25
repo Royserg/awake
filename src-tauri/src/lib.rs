@@ -1,11 +1,37 @@
-use std::sync::Mutex;
 use nosleep::{NoSleep, NoSleepType};
-use tauri::{ image::Image, menu::{Menu, MenuItem}, tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent}, Manager, State};
+use std::sync::Mutex;
+use tauri::{
+    image::Image,
+    menu::{Menu, MenuItem},
+    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, State, WindowEvent,
+};
+
+#[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    // (MacOS) Hide from Dock when window is hidden
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+#[tauri::command]
+fn show_splash(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 #[tauri::command]
 fn activate(state: State<'_, Mutex<AppState>>) -> String {
     let mut state = state.lock().unwrap();
-    state.no_sleep.start(NoSleepType::PreventUserIdleDisplaySleep).expect("Failed to start NoSleep");
+    state
+        .no_sleep
+        .start(NoSleepType::PreventUserIdleDisplaySleep)
+        .expect("Failed to start NoSleep");
     format!("activated")
 }
 
@@ -16,42 +42,57 @@ fn deactivate(state: State<'_, Mutex<AppState>>) -> String {
     format!("deactivated")
 }
 
-
 struct AppState {
     no_sleep_active: bool,
     no_sleep: NoSleep,
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            // Hide the main window
-            if let Some(window) = app.get_webview_window("main") {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
-            } else {
-                // We should not care as long as app is running
-                eprintln!("Main window not found, could not hide it.");
+                // (MacOS) Hide from Dock when window is closed
+                #[cfg(target_os = "macos")]
+                let _ = window
+                    .app_handle()
+                    .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                api.prevent_close();
             }
-
-            app.manage(Mutex::new(
-                AppState {
-                    no_sleep: NoSleep::new().unwrap(),
-                    no_sleep_active: false,
-                }
-            ));
+            _ => {}
+        })
+        .setup(|app| {
+            let mut no_sleep = NoSleep::new().unwrap();
+            no_sleep
+                .start(NoSleepType::PreventUserIdleDisplaySleep)
+                .expect("Failed to start NoSleep");
+            app.manage(Mutex::new(AppState {
+                no_sleep: no_sleep,
+                no_sleep_active: true,
+            }));
 
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+
+            #[cfg(debug_assertions)]
+            let menu = {
+                let show_splash_i =
+                    MenuItem::with_id(app, "show_splash", "Show Splash", true, None::<&str>)?;
+                Menu::with_items(app, &[&show_splash_i, &quit_i])?
+            };
+
+            #[cfg(not(debug_assertions))]
             let menu = Menu::with_items(app, &[&quit_i])?;
 
             // icons
-            let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
-            let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
+            let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
+            let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
 
             let _tray = TrayIconBuilder::new()
-                .icon(off_icon)
+                .icon(on_icon)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, e| {
@@ -63,7 +104,7 @@ pub fn run() {
                         // MouseClick triggers 2 events: Up and Down one after another
                         // this prevents immediate switch back
                         if let MouseButtonState::Down = button_state {
-                           return;
+                            return;
                         };
 
                         let handle = tray.app_handle();
@@ -75,7 +116,8 @@ pub fn run() {
 
                         if !is_no_sleep_active {
                             // Activate
-                            state.no_sleep
+                            state
+                                .no_sleep
                                 .start(NoSleepType::PreventUserIdleDisplaySleep)
                                 .expect("Failed to start NoSleep");
 
@@ -86,9 +128,7 @@ pub fn run() {
                             state.no_sleep_active = true;
                         } else {
                             // Deactivate
-                            state.no_sleep
-                                .stop()
-                                .expect("Failed to stop NoSleep");
+                            state.no_sleep.stop().expect("Failed to stop NoSleep");
 
                             let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
                             let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
@@ -96,21 +136,31 @@ pub fn run() {
 
                             state.no_sleep_active = false;
                         }
-                     }
-                })
-                .on_menu_event(|app, e| {
-                    match e.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
+                })
+                .on_menu_event(|app, e| match e.id.as_ref() {
+                    #[cfg(debug_assertions)]
+                    "show_splash" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
                 })
                 .build(app)?;
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![activate, deactivate])
+        .invoke_handler(tauri::generate_handler![
+            hide_window,
+            show_splash,
+            activate,
+            deactivate
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
