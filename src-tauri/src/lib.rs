@@ -14,7 +14,7 @@ fn hide_window(app: tauri::AppHandle) {
     }
     // (MacOS) Hide from Dock when window is hidden
     #[cfg(target_os = "macos")]
-    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
 #[tauri::command]
@@ -58,15 +58,21 @@ pub fn run() {
                 let _ = window.hide();
                 // (MacOS) Hide from Dock when window is closed
                 #[cfg(target_os = "macos")]
-                window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let _ = window
+                    .app_handle()
+                    .set_activation_policy(tauri::ActivationPolicy::Accessory);
                 api.prevent_close();
             }
             _ => {}
         })
         .setup(|app| {
+            let mut no_sleep = NoSleep::new().unwrap();
+            no_sleep
+                .start(NoSleepType::PreventUserIdleDisplaySleep)
+                .expect("Failed to start NoSleep");
             app.manage(Mutex::new(AppState {
-                no_sleep: NoSleep::new().unwrap(),
-                no_sleep_active: false,
+                no_sleep: no_sleep,
+                no_sleep_active: true,
             }));
 
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -82,11 +88,11 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&quit_i])?;
 
             // icons
-            let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
-            let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
+            let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
+            let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
 
             let _tray = TrayIconBuilder::new()
-                .icon(off_icon)
+                .icon(on_icon)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, e| {
