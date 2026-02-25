@@ -217,7 +217,7 @@ fn compute_timer_text(state: &StateSnapshot) -> String {
         let elapsed = activated_at.elapsed();
         format_remaining(elapsed, timer_duration)
     } else {
-        "Set Timer...".to_string()
+        "Set Timer".to_string()
     }
 }
 
@@ -290,7 +290,7 @@ pub fn run() {
             let status_i = MenuItem::with_id(app, "status", "● Awake (0)", false, None::<&str>)?;
 
             // Timer item (shows remaining time or "Set Timer...")
-            let timer_i = MenuItem::with_id(app, "timer", "Set Timer...", true, None::<&str>)?;
+            let timer_i = MenuItem::with_id(app, "timer", "Set Timer", true, None::<&str>)?;
 
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let separator_i = PredefinedMenuItem::separator(app)?;
