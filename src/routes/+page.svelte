@@ -21,7 +21,6 @@
 
     // Check for updates
     try {
-      // update logic:
       const update = await check();
       if (update) {
         isUpdating = true;
@@ -135,7 +134,7 @@
     justify-content: flex-start;
     transform: scaleY(0.15);
     opacity: 0.8;
-    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: transform 0.5s ease-in-out;
   }
 
   .pixel-eye.opening {
