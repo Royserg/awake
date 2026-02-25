@@ -177,8 +177,30 @@ struct MenuItems {
     timer: MenuItem<tauri::Wry>,
 }
 
-fn update_status_item(menu_items: &MenuItems, state: &AppState) {
-    let text = if state.no_sleep_active {
+// Track previous display text for change detection
+struct DisplayState {
+    last_status_text: String,
+    last_timer_text: String,
+}
+
+impl DisplayState {
+    fn new() -> Self {
+        Self {
+            last_status_text: String::new(),
+            last_timer_text: String::new(),
+        }
+    }
+}
+
+// Data extracted from state for UI updates (to avoid holding mutex during UI ops)
+struct StateSnapshot {
+    no_sleep_active: bool,
+    activated_at: Option<Instant>,
+    timer_duration: Option<Duration>,
+}
+
+fn compute_status_text(state: &StateSnapshot) -> String {
+    if state.no_sleep_active {
         if let Some(activated_at) = state.activated_at {
             let elapsed = activated_at.elapsed();
             format_duration(elapsed)
@@ -187,22 +209,54 @@ fn update_status_item(menu_items: &MenuItems, state: &AppState) {
         }
     } else {
         "○ Off".to_string()
-    };
-
-    let _ = menu_items.status.set_text(&text);
+    }
 }
 
-fn update_timer_item(menu_items: &MenuItems, state: &AppState) {
-    let text = if let (Some(activated_at), Some(timer_duration)) =
-        (state.activated_at, state.timer_duration)
-    {
+fn compute_timer_text(state: &StateSnapshot) -> String {
+    if let (Some(activated_at), Some(timer_duration)) = (state.activated_at, state.timer_duration) {
         let elapsed = activated_at.elapsed();
         format_remaining(elapsed, timer_duration)
     } else {
         "Set Timer...".to_string()
-    };
+    }
+}
 
-    let _ = menu_items.timer.set_text(&text);
+fn update_status_item_if_changed(
+    menu_items: &MenuItems,
+    display_state: &mut DisplayState,
+    state: &StateSnapshot,
+) {
+    let text = compute_status_text(state);
+    if display_state.last_status_text != text {
+        display_state.last_status_text = text.clone();
+        let _ = menu_items.status.set_text(&text);
+    }
+}
+
+fn update_timer_item_if_changed(
+    menu_items: &MenuItems,
+    display_state: &mut DisplayState,
+    state: &StateSnapshot,
+) {
+    let text = compute_timer_text(state);
+    if display_state.last_timer_text != text {
+        display_state.last_timer_text = text.clone();
+        let _ = menu_items.timer.set_text(&text);
+    }
+}
+
+// Force update (bypass change detection) for user-initiated state changes
+fn force_update_menu_items(
+    menu_items: &MenuItems,
+    display_state: &mut DisplayState,
+    state: &StateSnapshot,
+) {
+    let status_text = compute_status_text(state);
+    let timer_text = compute_timer_text(state);
+    display_state.last_status_text = status_text.clone();
+    display_state.last_timer_text = timer_text.clone();
+    let _ = menu_items.status.set_text(&status_text);
+    let _ = menu_items.timer.set_text(&timer_text);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entrypoint)]
@@ -270,59 +324,113 @@ pub fn run() {
                 timer: timer_i,
             });
 
+            // Track display state for change detection
+            let display_state = Arc::new(Mutex::new(DisplayState::new()));
+
             // icons
             let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
             let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
 
             let menu_items_clone = menu_items.clone();
+            let display_state_clone = display_state.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(on_icon)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(move |tray, e| {
-                    if let TrayIconEvent::Click { button_state, .. } = e {
-                        // Proceed only with one of the states
-                        // MouseClick triggers 2 events: Up and Down one after another
-                        // this prevents immediate switch back
-                        if let MouseButtonState::Down = button_state {
-                            return;
-                        };
+                    if let TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = e
+                    {
+                        use tauri::tray::MouseButton;
 
-                        let handle = tray.app_handle();
-                        let state_guard = handle.state::<Mutex<AppState>>();
+                        match button {
+                            MouseButton::Right => {
+                                // Right-click opens menu - update menu items immediately with current state
+                                if let MouseButtonState::Down = button_state {
+                                    let handle = tray.app_handle();
+                                    let state_guard = handle.state::<Mutex<AppState>>();
+                                    let state =
+                                        state_guard.lock().expect("Failed to lock AppState");
 
-                        let mut state = state_guard.lock().expect("Failed to lock AppState");
+                                    let snapshot = StateSnapshot {
+                                        no_sleep_active: state.no_sleep_active,
+                                        activated_at: state.activated_at,
+                                        timer_duration: state.timer_duration,
+                                    };
+                                    drop(state); // Release mutex before UI operations
 
-                        let is_no_sleep_active = state.no_sleep_active;
+                                    // Force update menu items to show current time
+                                    let mut display = display_state_clone
+                                        .lock()
+                                        .expect("Failed to lock DisplayState");
+                                    force_update_menu_items(
+                                        &menu_items_clone,
+                                        &mut display,
+                                        &snapshot,
+                                    );
+                                }
+                            }
+                            MouseButton::Left => {
+                                // Left-click toggles awake state
+                                // Proceed only with one of the states
+                                // MouseClick triggers 2 events: Up and Down one after another
+                                // this prevents immediate switch back
+                                if let MouseButtonState::Down = button_state {
+                                    return;
+                                };
 
-                        if !is_no_sleep_active {
-                            // Activate
-                            state
-                                .no_sleep
-                                .start(NoSleepType::PreventUserIdleDisplaySleep)
-                                .expect("Failed to start NoSleep");
-                            state.no_sleep_active = true;
-                            state.activated_at = Some(Instant::now());
-                            // Keep the timer_duration if previously set
+                                let handle = tray.app_handle();
+                                let state_guard = handle.state::<Mutex<AppState>>();
 
-                            let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
-                            let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
-                            tray.set_icon(Some(on_icon)).unwrap();
-                        } else {
-                            // Deactivate
-                            state.no_sleep.stop().expect("Failed to stop NoSleep");
-                            state.no_sleep_active = false;
-                            state.activated_at = None;
-                            state.timer_duration = None;
+                                let mut state =
+                                    state_guard.lock().expect("Failed to lock AppState");
 
-                            let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
-                            let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
-                            tray.set_icon(Some(off_icon)).unwrap();
+                                let is_no_sleep_active = state.no_sleep_active;
+
+                                if !is_no_sleep_active {
+                                    // Activate
+                                    state
+                                        .no_sleep
+                                        .start(NoSleepType::PreventUserIdleDisplaySleep)
+                                        .expect("Failed to start NoSleep");
+                                    state.no_sleep_active = true;
+                                    state.activated_at = Some(Instant::now());
+                                    // Keep the timer_duration if previously set
+
+                                    let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
+                                    let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
+                                    tray.set_icon(Some(on_icon)).unwrap();
+                                } else {
+                                    // Deactivate
+                                    state.no_sleep.stop().expect("Failed to stop NoSleep");
+                                    state.no_sleep_active = false;
+                                    state.activated_at = None;
+                                    state.timer_duration = None;
+
+                                    let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
+                                    let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
+                                    tray.set_icon(Some(off_icon)).unwrap();
+                                }
+
+                                // Create snapshot for UI update and release lock
+                                let snapshot = StateSnapshot {
+                                    no_sleep_active: state.no_sleep_active,
+                                    activated_at: state.activated_at,
+                                    timer_duration: state.timer_duration,
+                                };
+                                drop(state); // Release mutex before UI operations
+
+                                // Force update menu items (user-initiated change)
+                                let mut display = display_state_clone
+                                    .lock()
+                                    .expect("Failed to lock DisplayState");
+                                force_update_menu_items(&menu_items_clone, &mut display, &snapshot);
+                            }
+                            _ => {}
                         }
-
-                        // Update status item
-                        update_status_item(&menu_items_clone, &state);
-                        update_timer_item(&menu_items_clone, &state);
                     }
                 })
                 .on_menu_event(|app, e| match e.id.as_ref() {
@@ -351,45 +459,68 @@ pub fn run() {
 
             // Manage menu items so they're accessible from background thread
             app.manage(menu_items);
+            app.manage(display_state);
 
             // Spawn background task to update duration display and check timer expiration
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 loop {
-                    std::thread::sleep(Duration::from_secs(1));
+                    std::thread::sleep(Duration::from_secs(10));
 
                     let state_guard = app_handle.state::<Mutex<AppState>>();
                     let menu_items_guard = app_handle.state::<Arc<MenuItems>>();
+                    let display_state_guard = app_handle.state::<Arc<Mutex<DisplayState>>>();
 
-                    let mut state = state_guard.lock().expect("Failed to lock AppState");
-                    let menu_items = menu_items_guard.inner().clone();
+                    // Lock state, extract data, release lock before UI operations
+                    let (snapshot, timer_expired) = {
+                        let mut state = state_guard.lock().expect("Failed to lock AppState");
 
-                    if state.no_sleep_active {
-                        // Update duration display
-                        update_status_item(&menu_items, &state);
-                        update_timer_item(&menu_items, &state);
+                        if !state.no_sleep_active {
+                            (None, false)
+                        } else {
+                            // Check timer expiration
+                            let expired = if let (Some(activated_at), Some(timer_duration)) =
+                                (state.activated_at, state.timer_duration)
+                            {
+                                activated_at.elapsed() >= timer_duration
+                            } else {
+                                false
+                            };
 
-                        // Check timer expiration
-                        if let (Some(activated_at), Some(timer_duration)) =
-                            (state.activated_at, state.timer_duration)
-                        {
-                            if activated_at.elapsed() >= timer_duration {
+                            if expired {
                                 // Timer expired - deactivate
                                 let _ = state.no_sleep.stop();
                                 state.no_sleep_active = false;
                                 state.activated_at = None;
                                 state.timer_duration = None;
+                            }
 
-                                // Update tray icon
-                                if let Some(tray) = app_handle.tray_by_id("main") {
-                                    let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
-                                    let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
-                                    let _ = tray.set_icon(Some(off_icon));
-                                }
+                            let snapshot = StateSnapshot {
+                                no_sleep_active: state.no_sleep_active,
+                                activated_at: state.activated_at,
+                                timer_duration: state.timer_duration,
+                            };
 
-                                // Update status item
-                                update_status_item(&menu_items, &state);
-                                update_timer_item(&menu_items, &state);
+                            (Some(snapshot), expired)
+                        }
+                    }; // AppState lock released here
+
+                    // Now perform UI updates without holding AppState lock
+                    if let Some(snapshot) = snapshot {
+                        let menu_items = menu_items_guard.inner().clone();
+                        let mut display = display_state_guard
+                            .lock()
+                            .expect("Failed to lock DisplayState");
+
+                        update_status_item_if_changed(&menu_items, &mut display, &snapshot);
+                        update_timer_item_if_changed(&menu_items, &mut display, &snapshot);
+
+                        if timer_expired {
+                            // Update tray icon
+                            if let Some(tray) = app_handle.tray_by_id("main") {
+                                let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
+                                let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
+                                let _ = tray.set_icon(Some(off_icon));
                             }
                         }
                     }
