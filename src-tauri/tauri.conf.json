@@ -19,6 +19,16 @@
         "decorations": false,
         "resizable": false,
         "center": true
+      },
+      {
+        "label": "timer",
+        "title": "Set Timer",
+        "url": "/timer",
+        "width": 280,
+        "height": 200,
+        "resizable": false,
+        "visible": false,
+        "focus": true
       }
     ],
     "security": {
