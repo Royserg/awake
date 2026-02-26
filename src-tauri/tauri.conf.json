@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Awake",
-        "width": 200,
-        "height": 200,
+        "width": 300,
+        "height": 300,
         "decorations": false,
         "resizable": false,
         "center": true
