@@ -18,6 +18,7 @@ xattr -cr /Applications/Awake.app
 
 - Toggle sleep prevention with a single click
 - Visual indicator in system tray
+- Timer for keeping system awake for a period of time
 
 ## Usage
 
