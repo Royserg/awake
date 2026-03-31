@@ -111,6 +111,7 @@ fn open_timer_window(app: tauri::AppHandle) {
             .title("Set Timer")
             .inner_size(280.0, 200.0)
             .resizable(false)
+            .always_on_top(true)
             .focused(true)
             .build();
     }
