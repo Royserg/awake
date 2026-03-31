@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(pnpm tauri:*)",
+      "Bash(git remote:*)",
+      "Bash(cargo check:*)",
+      "Bash(git:*)",
+      "Bash(cargo build:*)",
+      "Bash(head:*)",
+      "Bash(pkill:*)"
+    ]
+  }
+}
