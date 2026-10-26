@@ -1,12 +1,20 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
+import adapter from "@sveltejs/adapter-static";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
+import process from "node:process";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: [sveltekit()],
+  plugins: [
+    sveltekit({
+      preprocess: vitePreprocess(),
+      // Tauri serves static files without a Node.js server.
+      adapter: adapter(),
+    }),
+  ],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

@@ -22,10 +22,14 @@ xattr -cr /Applications/Awake.app
 
 ## Usage
 
-- Click the tray icon to toggle sleep prevention
-- Right-click for the quit option
+- Left-click the tray icon to toggle sleep prevention
+- Right-click to see the awake status, set or cancel a timer, or quit
+- When a timer finishes, sleep prevention turns off. Left-click to turn it on again without a timer.
 
 ## Development
+
+Requires Node.js 22.17 or newer (CI uses Node.js 24), pnpm, and a current stable Rust toolchain.
+Frontend configuration lives in `vite.config.js` using SvelteKit 3.
 
 Built with:
 
