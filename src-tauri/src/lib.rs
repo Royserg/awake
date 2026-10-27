@@ -1,3 +1,5 @@
+mod startup_presentation;
+
 use nosleep::{NoSleep, NoSleepType};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -5,36 +7,43 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 #[tauri::command]
-fn hide_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-    // (MacOS) Hide from Dock when window is hidden
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+fn hide_window(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    startup_presentation::hide_main(&app);
+    app.emit_to("main", "startup-main-hidden", ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn show_splash(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+fn show_splash(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    app.emit_to("main", "startup-compat-show", ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn activate(app: tauri::AppHandle, state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+fn activate(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    startup_presentation::allowed_app_caller(&window)?;
     state.lock().unwrap().activate()?;
     queue_tray_refresh(&app);
     Ok("activated".to_string())
 }
 
 #[tauri::command]
-fn deactivate(app: tauri::AppHandle, state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+fn deactivate(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    startup_presentation::allowed_app_caller(&window)?;
     state.lock().unwrap().deactivate()?;
     queue_tray_refresh(&app);
     Ok("deactivated".to_string())
@@ -44,8 +53,10 @@ fn deactivate(app: tauri::AppHandle, state: State<'_, Mutex<AppState>>) -> Resul
 fn set_timer_duration(
     app: tauri::AppHandle,
     duration_ms: u64,
+    window: WebviewWindow,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
     state
         .lock()
         .unwrap()
@@ -60,28 +71,48 @@ fn set_timer_duration(
 }
 
 #[tauri::command]
-fn cancel_timer(app: tauri::AppHandle, state: State<'_, Mutex<AppState>>) {
+fn cancel_timer(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
     state.lock().unwrap().timer_duration = None;
     queue_tray_refresh(&app);
+    Ok(())
 }
 
 #[tauri::command]
-fn get_timer_remaining_ms(state: State<'_, Mutex<AppState>>) -> Option<u64> {
+fn get_timer_remaining_ms(
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Option<u64>, String> {
+    startup_presentation::allowed_app_caller(&window)?;
     let state = state.lock().unwrap();
-    if let (Some(activated_at), Some(timer_duration)) = (state.activated_at, state.timer_duration) {
-        let elapsed = activated_at.elapsed();
-        if elapsed < timer_duration {
-            Some((timer_duration - elapsed).as_millis() as u64)
+    Ok(
+        if let (Some(activated_at), Some(timer_duration)) =
+            (state.activated_at, state.timer_duration)
+        {
+            let elapsed = activated_at.elapsed();
+            if elapsed < timer_duration {
+                Some((timer_duration - elapsed).as_millis() as u64)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    }
+        },
+    )
 }
 
 #[tauri::command]
-fn open_timer_window(app: tauri::AppHandle) {
+fn open_timer_window(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    open_timer_window_internal(app);
+    Ok(())
+}
+
+fn open_timer_window_internal(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("timer") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -175,9 +206,9 @@ fn format_duration(elapsed: Duration) -> String {
 fn format_remaining(elapsed: Duration, timer_duration: Duration) -> String {
     let remaining = timer_duration.saturating_sub(elapsed);
     let total_secs = remaining.as_secs();
-    let mins = (total_secs + 59) / 60; // Round up to nearest minute
+    let mins = total_secs.div_ceil(60); // Round up to nearest minute
 
-    if mins <= 0 {
+    if mins == 0 {
         "Timer".to_string()
     } else if mins >= 60 {
         let hours = mins / 60;
@@ -307,30 +338,71 @@ fn queue_tray_refresh(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entrypoint)]
 pub fn run() {
+    #[cfg(debug_assertions)]
+    let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        hide_window,
+        show_splash,
+        activate,
+        deactivate,
+        set_timer_duration,
+        cancel_timer,
+        get_timer_remaining_ms,
+        open_timer_window,
+        startup_presentation::startup_context,
+        startup_presentation::start_intro,
+        startup_presentation::intro_config,
+        startup_presentation::intro_ready,
+        startup_presentation::finish_intro,
+        startup_presentation::show_compact,
+        startup_presentation::hide_compact,
+        startup_presentation::preview_context,
+        startup_presentation::preview_present,
+        startup_presentation::preview_ready,
+        startup_presentation::preview_finish,
+        startup_presentation::preview_control,
+        startup_presentation::preview_sample
+    ];
+    #[cfg(not(debug_assertions))]
+    let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        hide_window,
+        show_splash,
+        activate,
+        deactivate,
+        set_timer_duration,
+        cancel_timer,
+        get_timer_remaining_ms,
+        open_timer_window,
+        startup_presentation::startup_context,
+        startup_presentation::start_intro,
+        startup_presentation::intro_config,
+        startup_presentation::intro_ready,
+        startup_presentation::finish_intro,
+        startup_presentation::show_compact,
+        startup_presentation::hide_compact
+    ];
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                // For timer window, allow it to close normally
-                if window.label() == "timer" {
-                    // Let it close - don't prevent
-                } else {
-                    let _ = window.hide();
-                    // (MacOS) Hide from Dock when window is closed
-                    #[cfg(target_os = "macos")]
-                    let _ = window
-                        .app_handle()
-                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
-                    api.prevent_close();
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                match window.label() {
+                    "main" => {
+                        startup_presentation::hide_main(window.app_handle());
+                        let _ = window.emit("startup-main-hidden", ());
+                        api.prevent_close();
+                    }
+                    "startup-preview" => startup_presentation::preview_closed(window.app_handle()),
+                    _ => {}
                 }
             }
-            _ => {}
         })
         .setup(|app| {
             let app_state = AppState::new();
             app.manage(Mutex::new(app_state));
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            startup_presentation::setup(app.handle());
 
             // Status item (shows duration when active)
             let status_i = MenuItem::with_id(app, "status", "● Awake (0)", false, None::<&str>)?;
@@ -343,8 +415,8 @@ pub fn run() {
 
             #[cfg(debug_assertions)]
             let menu = {
-                let show_splash_i =
-                    MenuItem::with_id(app, "show_splash", "Show Splash", true, None::<&str>)?;
+                let preview_i =
+                    MenuItem::with_id(app, "intro_preview", "Intro Preview", true, None::<&str>)?;
                 Menu::with_items(
                     app,
                     &[
@@ -352,7 +424,7 @@ pub fn run() {
                         &separator_i,
                         &timer_i,
                         &separator_i,
-                        &show_splash_i,
+                        &preview_i,
                         &quit_i,
                     ],
                 )?
@@ -396,6 +468,7 @@ pub fn run() {
                     {
                         use tauri::tray::MouseButton;
                         let app = tray.app_handle();
+                        startup_presentation::dismiss_intro(app);
                         match (button, button_state) {
                             (MouseButton::Left, MouseButtonState::Up) => {
                                 let result = {
@@ -421,19 +494,14 @@ pub fn run() {
                 })
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     #[cfg(debug_assertions)]
-                    "show_splash" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                    "intro_preview" => startup_presentation::open_preview(app),
                     "timer" => {
                         if let Some(window) = app.get_webview_window("timer") {
                             let _ = window.show();
                             let _ = window.set_focus();
                         } else {
                             let handle = app.app_handle().to_owned();
-                            open_timer_window(handle);
+                            open_timer_window_internal(handle);
                         }
                     }
                     "quit" => {
@@ -470,18 +538,14 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            hide_window,
-            show_splash,
-            activate,
-            deactivate,
-            set_timer_duration,
-            cancel_timer,
-            get_timer_remaining_ms,
-            open_timer_window
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .invoke_handler(handler)
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                startup_presentation::shutdown(app);
+            }
+        });
 }
 
 // Exercise the real sleep inhibitor on macOS without launching the UI or updater.

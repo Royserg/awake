@@ -18,8 +18,8 @@ The registered Tauri IPC handlers in `lib.rs` have the following contracts.
 
 | Handler | Explicit Rust input | Result and behavior |
 | --- | --- | --- |
-| `hide_window` | None | Hides `main`; requests Accessory activation policy on macOS. |
-| `show_splash` | None | Shows and focuses `main` when it exists. |
+| `hide_window` | None | Ends the current compact presentation and hides `main`; emits the user-hide event. |
+| `show_splash` | None | Requests a short static intro from the main owner; does not recheck updates or interrupt an update. |
 | `activate` | None | Returns `"activated"` after a successful activation; otherwise a string error. |
 | `deactivate` | None | Returns `"deactivated"` after a successful deactivation; otherwise a string error. |
 | `set_timer_duration` | `duration_ms: u64` | Activates Awake, replaces the timer, and destroys an existing `timer` window; returns success or a string error. |
@@ -68,8 +68,9 @@ activation flag, monotonic activation timestamp, and optional timer duration.
   updated before `set_text`, whose error is ignored, so an identical label is
   not retried until its computed text changes. Failed icon updates leave the
   cached activation flag unchanged and can be retried on a later refresh.
-- Closing `timer` is allowed. Closing another window hides it and prevents its
-  destruction, keeping the tray application available.
+- Closing `main` hides it and preserves the updater owner. Closing the timer or
+  preview controller is allowed; preview close ends its passive surface. Transient
+  overlay destruction is allowed. Closing/tray events never mutate update state.
 
 ## Side Effects
 
@@ -81,12 +82,12 @@ activation flag, monotonic activation timestamp, and optional timer duration.
 - Setup refreshes the tray and starts the periodic timer/refresh worker.
 - A left-button release on the tray toggles activation. A right-button press
   refreshes it. Toggle failures are printed to stderr. The timer menu opens the
-  timer window; the quit menu exits the process. Debug builds also handle the
-  splash menu action.
+  timer window; the quit menu exits the process. Debug builds also provide the
+  Intro Preview menu action. Any tray interaction dismisses the cinematic overlay.
 - The timer webview is titled `Set Timer`, sized 280 by 200, nonresizable,
   always on top, and initially focused. Window show/hide/focus/create/destroy
   errors are generally ignored by the handlers.
-- Hiding or closing the main window requests macOS Accessory activation policy.
+- macOS Accessory activation policy is established during setup.
   Windows release builds suppress the additional console window through the
   binary entry-point attribute.
 
@@ -104,3 +105,41 @@ expiry/reactivation, manual toggles, timer replacement, and cancellation. A test
 run on another platform does not execute those macOS-only cases. Native tray
 clicks and window behavior also require a desktop smoke check.
 
+
+## Native startup presentation
+
+[startup_presentation.rs](./startup_presentation.rs) owns IPC and native UI
+operations, with no `AppState`/NoSleep reference. Its private
+[registry and platform modules](./startup_presentation/README.md) separate
+request/lifetime policy from target-specific compact-show mechanisms. One managed condition-variable worker
+invalidates expired runs before queuing UI cleanup. Preparation and production
+visible deadlines are two seconds each; debug surfaces have a 30-second absolute
+lease. Tauri queues destruction, so a replacement fixed-label preview waits for
+manager removal; the same worker retries preparation only while its token and
+original deadline remain valid. Failed cleanup retains actual handles for retry.
+
+Production owner `main` calls `startup_context`, `start_intro`, `show_compact`,
+`hide_compact`, and `finish_intro`. Passive surfaces call `intro_config`, then
+`intro_ready`/`finish_intro` for their matching run. Debug-only handlers are
+`preview_context`, `preview_present`, `preview_ready`, `preview_control`,
+`preview_sample`, and `preview_finish`; exact preview labels cannot access Awake
+state, real updater/process grants, or production presentation commands.
+Existing application commands accept only `main`/`timer` callers.
+
+Each namespace retains its highest revision, typed request, decimal-string token,
+and status. Identical duplicates preserve token/deadline; conflicting or stale
+requests fail. Owners can send a higher revision with a null token to cancel
+pending creation; passive surfaces can finish only their own token. Late token
+cleanup cannot invalidate a newer run. Context commands return the existing
+revision so a reloaded controller does not restart its sequence at zero.
+
+Cinematic geometry uses cached launch-monitor physical bounds (cursor monitor,
+then primary), transparent background, no decorations/shadow/taskbar presence,
+nonfocusability, click-through, and always-on-top. Resize/scale/close invalidates
+that run. `main` remains a compact updater owner, kept alive while hidden.
+
+Compact show preserves focus through target-specific handling: macOS temporarily
+sets nonfocusable, Windows uses a scoped UI-thread CBT hook around normal Tauri
+show with forwarding-only cleanup retries, and Linux retains GTK focus-on-map
+false through asynchronous mapping. GTK accept-focus stays true. Platform-native
+acceptance beyond the local macOS smoke checks remains pending.

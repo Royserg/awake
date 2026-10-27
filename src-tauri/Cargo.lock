@@ -226,6 +226,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "awake"
 version = "0.3.3"
 dependencies = [
+ "gtk",
  "nosleep",
  "serde",
  "serde_json",
@@ -234,6 +235,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "windows 0.62.2",
 ]
 
 [[package]]

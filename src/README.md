@@ -8,6 +8,8 @@ This subtree contains Awake's SvelteKit document shell and frontend routes. Taur
 
 - [`app.html`](./app.html) defines the English-language HTML document, `Awake` title, UTF-8 encoding, viewport metadata, and favicon asset reference. It provides `%sveltekit.head%` and `%sveltekit.body%` injection points.
 - [Routes and animation contract](./routes/README.md): defines static rendering, the animated splash and updater flow, the public `PixelAnimation` controller and data types, and the timer child route.
+- [Passive intro route](./routes/intro/README.md): renders native-owned run tokens without updater or sleep-state access.
+- [Shared startup modules](./lib/startup/README.md): shared animation/controller code, injected presentation bridge, simulated preview drivers, and the production updater adapter.
 
 ## Invariants
 
@@ -22,4 +24,4 @@ This subtree contains Awake's SvelteKit document shell and frontend routes. Taur
 
 ## Verification
 
-From the repository root, run `pnpm check` and `pnpm build`. The package defines no test script.
+From the repository root, run `pnpm check`, `pnpm test:startup`, and `pnpm build`.
