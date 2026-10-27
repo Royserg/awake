@@ -13,7 +13,7 @@ and the `awake_lib` library, emitted as `staticlib`, `cdylib`, and `rlib`.
   contracts, sleep-prevention/timer state, and tray/window behavior. Command
   implementations are private Rust functions annotated for Tauri IPC.
 - [Tauri configuration](./tauri.conf.json): product `awake`, identifier
-  `com.awake.app`, and application version `0.3.3`. The configured `main`
+  `com.awake.app`, and application version `0.3.5`. The configured `main`
   window is centered, 300 by 300, undecorated, nonresizable, initially hidden,
   unfocused, omitted from the taskbar, and requests disabled background throttling.
   Separate dynamic windows provide transparent cinematic and debug preview surfaces.
@@ -26,7 +26,7 @@ and the `awake_lib` library, emitted as `staticlib`, `cdylib`, and `rlib`.
 
 ## Invariants
 
-- Cargo and Tauri application versions currently match at `0.3.3`.
+- Cargo and Tauri application versions currently match at `0.3.5`.
 - The runtime depends on Tauri with `tray-icon` and `image-png` features,
   `nosleep`, and the opener, process, and updater plugins. Plugin initialization
   belongs to the runtime; configuration alone does not grant frontend access.

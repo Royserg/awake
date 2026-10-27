@@ -1,6 +1,6 @@
 [package]
 name = "awake"
-version = "0.3.3"
+version = "0.3.5"
 description = "Keeps system awake"
 authors = ["you"]
 edition = "2021"

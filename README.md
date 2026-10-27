@@ -119,7 +119,7 @@ contract tree.
   `startup-intro` and debug preview labels receive only event listening grants;
   custom commands independently check callers. The timer retains its existing
   capability configuration.
-- The application version is currently `0.3.3` in `package.json`, `Cargo.toml`,
+- The application version is currently `0.3.5` in `package.json`, `Cargo.toml`,
   and `tauri.conf.json`. Keep release metadata consistent across these files.
 
 ## Global Side Effects
