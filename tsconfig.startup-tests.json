@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "erasableSyntaxOnly": true
+  },
+  "include": [
+    "tests/startup/**/*.ts",
+    "src/lib/startup/types.ts",
+    "src/lib/startup/tuning.ts",
+    "src/lib/startup/frame.ts",
+    "src/lib/startup/controller.ts",
+    "src/lib/startup/preview-driver.ts",
+    "src/lib/startup/native-presentation.ts",
+    "src/lib/startup/pixel-eye.ts",
+    "src/routes/eye-splashscreen.ts"
+  ]
+}

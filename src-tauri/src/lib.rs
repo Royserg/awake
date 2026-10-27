@@ -1,3 +1,5 @@
+mod startup_presentation;
+
 use nosleep::{NoSleep, NoSleepType};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -5,103 +7,112 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 #[tauri::command]
-fn hide_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-    // (MacOS) Hide from Dock when window is hidden
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+fn hide_window(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    startup_presentation::hide_main(&app);
+    app.emit_to("main", "startup-main-hidden", ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn show_splash(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+fn show_splash(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    app.emit_to("main", "startup-compat-show", ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn activate(state: State<'_, Mutex<AppState>>) -> String {
-    let mut state = state.lock().unwrap();
+fn activate(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    state.lock().unwrap().activate()?;
+    queue_tray_refresh(&app);
+    Ok("activated".to_string())
+}
+
+#[tauri::command]
+fn deactivate(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    state.lock().unwrap().deactivate()?;
+    queue_tray_refresh(&app);
+    Ok("deactivated".to_string())
+}
+
+#[tauri::command]
+fn set_timer_duration(
+    app: tauri::AppHandle,
+    duration_ms: u64,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
     state
-        .no_sleep
-        .start(NoSleepType::PreventUserIdleDisplaySleep)
-        .expect("Failed to start NoSleep");
-    state.no_sleep_active = true;
-    state.activated_at = Some(Instant::now());
-    format!("activated")
-}
-
-#[tauri::command]
-fn deactivate(state: State<'_, Mutex<AppState>>) -> String {
-    let mut state = state.lock().unwrap();
-    state.no_sleep.stop().expect("Failed to stop NoSleep");
-    state.no_sleep_active = false;
-    state.activated_at = None;
-    state.timer_duration = None;
-    format!("deactivated")
-}
-
-#[tauri::command]
-fn set_timer_duration(app: tauri::AppHandle, duration_ms: u64, state: State<'_, Mutex<AppState>>) {
-    let mut state = state.lock().unwrap();
-
-    // Always reset activated_at when setting a timer (timer starts from now)
-    state.activated_at = Some(Instant::now());
-
-    // Activate no-sleep if not already active
-    if !state.no_sleep_active {
-        state
-            .no_sleep
-            .start(NoSleepType::PreventUserIdleDisplaySleep)
-            .expect("Failed to start NoSleep");
-        state.no_sleep_active = true;
-
-        // Update tray icon to on
-        if let Some(tray) = app.tray_by_id("main") {
-            let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
-            let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
-            let _ = tray.set_icon(Some(on_icon));
-        }
-    }
-
-    state.timer_duration = Some(Duration::from_millis(duration_ms));
+        .lock()
+        .unwrap()
+        .set_timer(Duration::from_millis(duration_ms))?;
+    queue_tray_refresh(&app);
 
     // Close the timer window
     if let Some(window) = app.get_webview_window("timer") {
         let _ = window.destroy();
     }
+    Ok(())
 }
 
 #[tauri::command]
-fn cancel_timer(state: State<'_, Mutex<AppState>>) {
-    let mut state = state.lock().unwrap();
-    state.timer_duration = None;
+fn cancel_timer(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    state.lock().unwrap().timer_duration = None;
+    queue_tray_refresh(&app);
+    Ok(())
 }
 
 #[tauri::command]
-fn get_timer_remaining_ms(state: State<'_, Mutex<AppState>>) -> Option<u64> {
+fn get_timer_remaining_ms(
+    window: WebviewWindow,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Option<u64>, String> {
+    startup_presentation::allowed_app_caller(&window)?;
     let state = state.lock().unwrap();
-    if let (Some(activated_at), Some(timer_duration)) = (state.activated_at, state.timer_duration) {
-        let elapsed = activated_at.elapsed();
-        if elapsed < timer_duration {
-            Some((timer_duration - elapsed).as_millis() as u64)
+    Ok(
+        if let (Some(activated_at), Some(timer_duration)) =
+            (state.activated_at, state.timer_duration)
+        {
+            let elapsed = activated_at.elapsed();
+            if elapsed < timer_duration {
+                Some((timer_duration - elapsed).as_millis() as u64)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    }
+        },
+    )
 }
 
 #[tauri::command]
-fn open_timer_window(app: tauri::AppHandle) {
+fn open_timer_window(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
+    startup_presentation::allowed_app_caller(&window)?;
+    open_timer_window_internal(app);
+    Ok(())
+}
+
+fn open_timer_window_internal(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("timer") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -137,6 +148,46 @@ impl AppState {
             timer_duration: None,
         }
     }
+
+    fn activate(&mut self) -> Result<(), String> {
+        if !self.no_sleep_active {
+            self.no_sleep
+                .start(NoSleepType::PreventUserIdleDisplaySleep)
+                .map_err(|error| error.to_string())?;
+            self.no_sleep_active = true;
+            self.activated_at = Some(Instant::now());
+            self.timer_duration = None;
+        }
+        Ok(())
+    }
+
+    fn deactivate(&mut self) -> Result<(), String> {
+        if self.no_sleep_active {
+            self.no_sleep.stop().map_err(|error| error.to_string())?;
+        }
+        self.no_sleep_active = false;
+        self.activated_at = None;
+        self.timer_duration = None;
+        Ok(())
+    }
+
+    fn set_timer(&mut self, duration: Duration) -> Result<(), String> {
+        self.activate()?;
+        self.activated_at = Some(Instant::now());
+        self.timer_duration = Some(duration);
+        Ok(())
+    }
+
+    fn expire_timer(&mut self, now: Instant) -> Result<(), String> {
+        if self.no_sleep_active {
+            if let (Some(started_at), Some(duration)) = (self.activated_at, self.timer_duration) {
+                if now.saturating_duration_since(started_at) >= duration {
+                    self.deactivate()?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn format_duration(elapsed: Duration) -> String {
@@ -155,9 +206,9 @@ fn format_duration(elapsed: Duration) -> String {
 fn format_remaining(elapsed: Duration, timer_duration: Duration) -> String {
     let remaining = timer_duration.saturating_sub(elapsed);
     let total_secs = remaining.as_secs();
-    let mins = (total_secs + 59) / 60; // Round up to nearest minute
+    let mins = total_secs.div_ceil(60); // Round up to nearest minute
 
-    if mins <= 0 {
+    if mins == 0 {
         "Timer".to_string()
     } else if mins >= 60 {
         let hours = mins / 60;
@@ -182,6 +233,7 @@ struct MenuItems {
 struct DisplayState {
     last_status_text: String,
     last_timer_text: String,
+    last_no_sleep_active: Option<bool>,
 }
 
 impl DisplayState {
@@ -189,6 +241,7 @@ impl DisplayState {
         Self {
             last_status_text: String::new(),
             last_timer_text: String::new(),
+            last_no_sleep_active: None,
         }
     }
 }
@@ -246,46 +299,110 @@ fn update_timer_item_if_changed(
     }
 }
 
-// Force update (bypass change detection) for user-initiated state changes
-fn force_update_menu_items(
-    menu_items: &MenuItems,
-    display_state: &mut DisplayState,
-    state: &StateSnapshot,
-) {
-    let status_text = compute_status_text(state);
-    let timer_text = compute_timer_text(state);
-    display_state.last_status_text = status_text.clone();
-    display_state.last_timer_text = timer_text.clone();
-    let _ = menu_items.status.set_text(&status_text);
-    let _ = menu_items.timer.set_text(&timer_text);
+// Only call on the main thread. No worker may hold these locks while waiting for UI work.
+fn refresh_tray(app: &tauri::AppHandle) {
+    let snapshot = {
+        let state = app.state::<Mutex<AppState>>();
+        let state = state.lock().expect("Failed to lock AppState");
+        StateSnapshot {
+            no_sleep_active: state.no_sleep_active,
+            activated_at: state.activated_at,
+            timer_duration: state.timer_duration,
+        }
+    };
+    let menu_items = app.state::<Arc<MenuItems>>();
+    let display_state = app.state::<Arc<Mutex<DisplayState>>>();
+    let mut display = display_state.lock().expect("Failed to lock DisplayState");
+    update_status_item_if_changed(&menu_items, &mut display, &snapshot);
+    update_timer_item_if_changed(&menu_items, &mut display, &snapshot);
+
+    if display.last_no_sleep_active != Some(snapshot.no_sleep_active) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let icon_bytes: &[u8] = if snapshot.no_sleep_active {
+                include_bytes!("../icons-on/64x64.png")
+            } else {
+                include_bytes!("../icons-off/64x64.png")
+            };
+            let icon = Image::from_bytes(icon_bytes).expect("Failed to decode tray icon");
+            if tray.set_icon(Some(icon)).is_ok() {
+                display.last_no_sleep_active = Some(snapshot.no_sleep_active);
+            }
+        }
+    }
+}
+
+fn queue_tray_refresh(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || refresh_tray(&handle));
 }
 
 #[cfg_attr(mobile, tauri::mobile_entrypoint)]
 pub fn run() {
+    #[cfg(debug_assertions)]
+    let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        hide_window,
+        show_splash,
+        activate,
+        deactivate,
+        set_timer_duration,
+        cancel_timer,
+        get_timer_remaining_ms,
+        open_timer_window,
+        startup_presentation::startup_context,
+        startup_presentation::start_intro,
+        startup_presentation::intro_config,
+        startup_presentation::intro_ready,
+        startup_presentation::finish_intro,
+        startup_presentation::show_compact,
+        startup_presentation::hide_compact,
+        startup_presentation::preview_context,
+        startup_presentation::preview_present,
+        startup_presentation::preview_ready,
+        startup_presentation::preview_finish,
+        startup_presentation::preview_control,
+        startup_presentation::preview_sample
+    ];
+    #[cfg(not(debug_assertions))]
+    let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        hide_window,
+        show_splash,
+        activate,
+        deactivate,
+        set_timer_duration,
+        cancel_timer,
+        get_timer_remaining_ms,
+        open_timer_window,
+        startup_presentation::startup_context,
+        startup_presentation::start_intro,
+        startup_presentation::intro_config,
+        startup_presentation::intro_ready,
+        startup_presentation::finish_intro,
+        startup_presentation::show_compact,
+        startup_presentation::hide_compact
+    ];
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                // For timer window, allow it to close normally
-                if window.label() == "timer" {
-                    // Let it close - don't prevent
-                } else {
-                    let _ = window.hide();
-                    // (MacOS) Hide from Dock when window is closed
-                    #[cfg(target_os = "macos")]
-                    let _ = window
-                        .app_handle()
-                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
-                    api.prevent_close();
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                match window.label() {
+                    "main" => {
+                        startup_presentation::hide_main(window.app_handle());
+                        let _ = window.emit("startup-main-hidden", ());
+                        api.prevent_close();
+                    }
+                    "startup-preview" => startup_presentation::preview_closed(window.app_handle()),
+                    _ => {}
                 }
             }
-            _ => {}
         })
         .setup(|app| {
             let app_state = AppState::new();
             app.manage(Mutex::new(app_state));
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            startup_presentation::setup(app.handle());
 
             // Status item (shows duration when active)
             let status_i = MenuItem::with_id(app, "status", "● Awake (0)", false, None::<&str>)?;
@@ -298,8 +415,8 @@ pub fn run() {
 
             #[cfg(debug_assertions)]
             let menu = {
-                let show_splash_i =
-                    MenuItem::with_id(app, "show_splash", "Show Splash", true, None::<&str>)?;
+                let preview_i =
+                    MenuItem::with_id(app, "intro_preview", "Intro Preview", true, None::<&str>)?;
                 Menu::with_items(
                     app,
                     &[
@@ -307,7 +424,7 @@ pub fn run() {
                         &separator_i,
                         &timer_i,
                         &separator_i,
-                        &show_splash_i,
+                        &preview_i,
                         &quit_i,
                     ],
                 )?
@@ -332,103 +449,44 @@ pub fn run() {
             let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
             let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
 
-            let menu_items_clone = menu_items.clone();
-            let display_state_clone = display_state.clone();
-            let _tray = TrayIconBuilder::with_id("main")
+            // Tauri >= 2.12.5 includes tray-icon's macOS 27 click forwarding fix.
+            let tray_builder = TrayIconBuilder::with_id("main")
                 .icon(on_icon)
                 .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_tray_icon_event(move |tray, e| {
+                .show_menu_on_left_click(false);
+
+            app.manage(menu_items);
+            app.manage(display_state);
+
+            let _tray = tray_builder
+                .on_tray_icon_event(move |tray, event| {
                     if let TrayIconEvent::Click {
                         button,
                         button_state,
                         ..
-                    } = e
+                    } = event
                     {
                         use tauri::tray::MouseButton;
-
-                        match button {
-                            MouseButton::Right => {
-                                // Right-click opens menu - update menu items immediately with current state
-                                if let MouseButtonState::Down = button_state {
-                                    let handle = tray.app_handle();
-                                    let state_guard = handle.state::<Mutex<AppState>>();
-                                    let state =
-                                        state_guard.lock().expect("Failed to lock AppState");
-
-                                    let snapshot = StateSnapshot {
-                                        no_sleep_active: state.no_sleep_active,
-                                        activated_at: state.activated_at,
-                                        timer_duration: state.timer_duration,
-                                    };
-                                    drop(state); // Release mutex before UI operations
-
-                                    // Force update menu items to show current time
-                                    let mut display = display_state_clone
-                                        .lock()
-                                        .expect("Failed to lock DisplayState");
-                                    force_update_menu_items(
-                                        &menu_items_clone,
-                                        &mut display,
-                                        &snapshot,
-                                    );
+                        let app = tray.app_handle();
+                        startup_presentation::dismiss_intro(app);
+                        match (button, button_state) {
+                            (MouseButton::Left, MouseButtonState::Up) => {
+                                let result = {
+                                    let state = app.state::<Mutex<AppState>>();
+                                    let mut state = state.lock().expect("Failed to lock AppState");
+                                    if state.no_sleep_active {
+                                        state.deactivate()
+                                    } else {
+                                        state.activate()
+                                    }
+                                };
+                                if let Err(error) = result {
+                                    eprintln!("Failed to toggle Awake: {error}");
                                 }
+                                refresh_tray(app);
                             }
-                            MouseButton::Left => {
-                                // Left-click toggles awake state
-                                // Proceed only with one of the states
-                                // MouseClick triggers 2 events: Up and Down one after another
-                                // this prevents immediate switch back
-                                if let MouseButtonState::Down = button_state {
-                                    return;
-                                };
-
-                                let handle = tray.app_handle();
-                                let state_guard = handle.state::<Mutex<AppState>>();
-
-                                let mut state =
-                                    state_guard.lock().expect("Failed to lock AppState");
-
-                                let is_no_sleep_active = state.no_sleep_active;
-
-                                if !is_no_sleep_active {
-                                    // Activate
-                                    state
-                                        .no_sleep
-                                        .start(NoSleepType::PreventUserIdleDisplaySleep)
-                                        .expect("Failed to start NoSleep");
-                                    state.no_sleep_active = true;
-                                    state.activated_at = Some(Instant::now());
-                                    // Keep the timer_duration if previously set
-
-                                    let on_icon_bytes = include_bytes!("../icons-on/64x64.png");
-                                    let on_icon = Image::from_bytes(on_icon_bytes).unwrap();
-                                    tray.set_icon(Some(on_icon)).unwrap();
-                                } else {
-                                    // Deactivate
-                                    state.no_sleep.stop().expect("Failed to stop NoSleep");
-                                    state.no_sleep_active = false;
-                                    state.activated_at = None;
-                                    state.timer_duration = None;
-
-                                    let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
-                                    let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
-                                    tray.set_icon(Some(off_icon)).unwrap();
-                                }
-
-                                // Create snapshot for UI update and release lock
-                                let snapshot = StateSnapshot {
-                                    no_sleep_active: state.no_sleep_active,
-                                    activated_at: state.activated_at,
-                                    timer_duration: state.timer_duration,
-                                };
-                                drop(state); // Release mutex before UI operations
-
-                                // Force update menu items (user-initiated change)
-                                let mut display = display_state_clone
-                                    .lock()
-                                    .expect("Failed to lock DisplayState");
-                                force_update_menu_items(&menu_items_clone, &mut display, &snapshot);
+                            (MouseButton::Right, MouseButtonState::Down) => {
+                                refresh_tray(app);
                             }
                             _ => {}
                         }
@@ -436,19 +494,14 @@ pub fn run() {
                 })
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     #[cfg(debug_assertions)]
-                    "show_splash" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                    "intro_preview" => startup_presentation::open_preview(app),
                     "timer" => {
                         if let Some(window) = app.get_webview_window("timer") {
                             let _ = window.show();
                             let _ = window.set_focus();
                         } else {
                             let handle = app.app_handle().to_owned();
-                            open_timer_window(handle);
+                            open_timer_window_internal(handle);
                         }
                     }
                     "quit" => {
@@ -458,88 +511,116 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Manage menu items so they're accessible from background thread
-            app.manage(menu_items);
-            app.manage(display_state);
+            refresh_tray(app.handle());
 
-            // Spawn background task to update duration display and check timer expiration
+            // The worker only schedules ticks. State transitions and UI updates run together
+            // on the main thread, so timer expiry cannot deadlock a click or paint stale state.
             let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                loop {
-                    std::thread::sleep(Duration::from_secs(10));
-
-                    let state_guard = app_handle.state::<Mutex<AppState>>();
-                    let menu_items_guard = app_handle.state::<Arc<MenuItems>>();
-                    let display_state_guard = app_handle.state::<Arc<Mutex<DisplayState>>>();
-
-                    // Lock state, extract data, release lock before UI operations
-                    let (snapshot, timer_expired) = {
-                        let mut state = state_guard.lock().expect("Failed to lock AppState");
-
-                        if !state.no_sleep_active {
-                            (None, false)
-                        } else {
-                            // Check timer expiration
-                            let expired = if let (Some(activated_at), Some(timer_duration)) =
-                                (state.activated_at, state.timer_duration)
-                            {
-                                activated_at.elapsed() >= timer_duration
-                            } else {
-                                false
-                            };
-
-                            if expired {
-                                // Timer expired - deactivate
-                                let _ = state.no_sleep.stop();
-                                state.no_sleep_active = false;
-                                state.activated_at = None;
-                                state.timer_duration = None;
-                            }
-
-                            let snapshot = StateSnapshot {
-                                no_sleep_active: state.no_sleep_active,
-                                activated_at: state.activated_at,
-                                timer_duration: state.timer_duration,
-                            };
-
-                            (Some(snapshot), expired)
-                        }
-                    }; // AppState lock released here
-
-                    // Now perform UI updates without holding AppState lock
-                    if let Some(snapshot) = snapshot {
-                        let menu_items = menu_items_guard.inner().clone();
-                        let mut display = display_state_guard
-                            .lock()
-                            .expect("Failed to lock DisplayState");
-
-                        update_status_item_if_changed(&menu_items, &mut display, &snapshot);
-                        update_timer_item_if_changed(&menu_items, &mut display, &snapshot);
-
-                        if timer_expired {
-                            // Update tray icon
-                            if let Some(tray) = app_handle.tray_by_id("main") {
-                                let off_icon_bytes = include_bytes!("../icons-off/64x64.png");
-                                let off_icon = Image::from_bytes(off_icon_bytes).unwrap();
-                                let _ = tray.set_icon(Some(off_icon));
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let handle = app_handle.clone();
+                if app_handle
+                    .run_on_main_thread(move || {
+                        {
+                            let state = handle.state::<Mutex<AppState>>();
+                            let mut state = state.lock().expect("Failed to lock AppState");
+                            if let Err(error) = state.expire_timer(Instant::now()) {
+                                eprintln!("Failed to stop Awake after timer expiry: {error}");
                             }
                         }
-                    }
+                        refresh_tray(&handle);
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             });
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            hide_window,
-            show_splash,
-            activate,
-            deactivate,
-            set_timer_duration,
-            cancel_timer,
-            get_timer_remaining_ms,
-            open_timer_window
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .invoke_handler(handler)
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                startup_presentation::shutdown(app);
+            }
+        });
+}
+
+// Exercise the real sleep inhibitor on macOS without launching the UI or updater.
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_reactivate_after_timer_expiry_repeatedly() {
+        let mut state = AppState::new();
+        let duration = Duration::from_secs(60);
+
+        for _ in 0..3 {
+            state.set_timer(duration).unwrap();
+            let started_at = state.activated_at.unwrap();
+            state
+                .expire_timer(started_at + duration - Duration::from_millis(1))
+                .unwrap();
+            assert!(state.no_sleep_active);
+
+            state.expire_timer(started_at + duration).unwrap();
+            assert!(!state.no_sleep_active);
+            assert!(state.activated_at.is_none());
+            assert!(state.timer_duration.is_none());
+
+            state.activate().unwrap();
+            assert!(state.no_sleep_active);
+            assert!(state.activated_at.is_some());
+            assert!(state.timer_duration.is_none());
+
+            // The previous deadline must not switch a new, untimed session off.
+            state
+                .expire_timer(started_at + duration + duration)
+                .unwrap();
+            assert!(state.no_sleep_active);
+        }
+        state.deactivate().unwrap();
+    }
+
+    #[test]
+    fn manual_toggle_clears_timer_and_can_restart() {
+        let mut state = AppState::new();
+        state.set_timer(Duration::from_secs(60)).unwrap();
+        state.deactivate().unwrap();
+        assert!(!state.no_sleep_active);
+        assert!(state.timer_duration.is_none());
+        state.deactivate().unwrap();
+        state.activate().unwrap();
+        let started_at = state.activated_at;
+        state.activate().unwrap();
+        assert_eq!(state.activated_at, started_at);
+        assert!(state.no_sleep_active);
+        assert!(state.timer_duration.is_none());
+        state.deactivate().unwrap();
+    }
+
+    #[test]
+    fn timer_can_be_replaced_cancelled_and_started_while_off() {
+        let mut state = AppState::new();
+        state.deactivate().unwrap();
+        state.set_timer(Duration::from_secs(60)).unwrap();
+        assert!(state.no_sleep_active);
+        state.set_timer(Duration::from_secs(120)).unwrap();
+        let started_at = state.activated_at.unwrap();
+        state
+            .expire_timer(started_at + Duration::from_secs(60))
+            .unwrap();
+        assert!(state.no_sleep_active);
+
+        state.timer_duration = None;
+        state
+            .expire_timer(started_at + Duration::from_secs(120))
+            .unwrap();
+        assert!(state.no_sleep_active);
+        assert!(state.timer_duration.is_none());
+        state.deactivate().unwrap();
+    }
 }

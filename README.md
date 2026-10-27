@@ -19,15 +19,155 @@ xattr -cr /Applications/Awake.app
 - Toggle sleep prevention with a single click
 - Visual indicator in system tray
 - Timer for keeping system awake for a period of time
+- A 1.75-second pixel-eye opening on every launch, with a compact closed-eye wait during updates
 
 ## Usage
 
-- Click the tray icon to toggle sleep prevention
-- Right-click for the quit option
+- Left-click the tray icon to toggle sleep prevention
+- Right-click to see the awake status, set or cancel a timer, or quit
+- When a timer finishes, sleep prevention turns off. Left-click to turn it on again without a timer.
 
 ## Development
+
+Requires Node.js 22.17 or newer (CI uses Node.js 24), pnpm, and a current stable Rust toolchain.
+Frontend configuration lives in `vite.config.js` using SvelteKit 3.
+
+Run `pnpm preview:intro` for the pixel-eye animation workbench: replay, pause,
+scrub, tune the shock wave, and rehearse simulated update transitions. This
+browser preview simulates updates. In a debug desktop build, right-click the
+tray and choose **Intro Preview**, then enable **Native desktop replay** for
+actual desktop surfaces. See the [preview guide](./docs/startup-preview.md).
 
 Built with:
 
 - [Tauri](https://tauri.app/)
 - Rust
+
+## System Overview
+
+Awake is a desktop tray application with a Rust backend and a statically built
+SvelteKit frontend. Rust owns the sleep inhibitor, activation state, timer,
+tray, and webview windows. The frontend supplies the startup splash, update
+flow, and timer controls through Tauri commands and plugins.
+
+The root [index.html](./index.html) is a standalone landing page. The desktop
+webview document comes from [src/app.html](./src/app.html), and its generated
+production assets are written to `build/`.
+
+## Local Interface & Invariants
+
+### Interface
+
+| File | Contract |
+| --- | --- |
+| [package.json](./package.json) | Defines the `awake` ESM package, development/build/check scripts, and frontend dependencies. `pnpm d` runs Tauri development; `pnpm tauri` exposes the Tauri CLI. |
+| [vite.config.js](./vite.config.js) | Exports Vite configuration using SvelteKit, `vitePreprocess`, and the static adapter. |
+| [tsconfig.json](./tsconfig.json) | Extends `$app/tsconfig` with strict TypeScript and JavaScript checking and bundler module resolution. |
+| [index.html](./index.html) | Provides the standalone landing page and animated tiled background. Its Download link currently targets `#`. |
+| [justfile](./justfile) | Contains development and icon shortcuts, plus legacy build/database recipes. `b` refers to an absent `t:build` package script; SQLx recipes require tooling and configuration not established by the current manifests. |
+| [PR checks](./.github/workflows/check.yml) | Checks frontend types/unused code, tests/build, Rust formatting/lints/tests, and release handlers on macOS, Windows, and Linux without signing or publishing. |
+| [Release workflow](./.github/workflows/build-prod.yml) | A push to `prod` creates a draft release, builds macOS ARM/Intel, Linux, and Windows artifacts, then publishes after the build job succeeds. Release names and tags come from `package.json`. |
+| [Pages workflow](./.github/workflows/static.yml) | A push to `prod` or manual dispatch requests a GitHub Pages deployment, with `./index.html` configured as the upload path. |
+
+### Invariants
+
+- The Vite development port is fixed at 1420 with `strictPort` enabled, matching
+  Tauri's configured development URL. `TAURI_DEV_HOST` optionally supplies the
+  host; remote-host HMR uses WebSocket port 1421.
+- Vite preserves terminal output and excludes `src-tauri` from its file watcher.
+- Use the package scripts and verification commands below for current checks;
+  legacy `justfile` entries do not establish working build or database targets.
+- Keep the standalone landing page separate from the SvelteKit application
+  document and routes.
+
+## Subdirectories & System Boundaries
+
+| Boundary | Responsibility |
+| --- | --- |
+| [Frontend source](./src/README.md) | HTML document shell and the frontend route tree. |
+| [Frontend routes](./src/routes/README.md) | Static rendering policy, splash animation, updater flow, and public `PixelAnimation` interfaces. |
+| [Timer route](./src/routes/timer/README.md) | Minute-based selection and cancellation controls that call the native timer commands. |
+| [Tauri package](./src-tauri/README.md) | Rust build integration, application configuration, window capabilities, bundling, and updater configuration. |
+| [Native runtime](./src-tauri/src/README.md) | `awake_lib::run()`, registered IPC handlers, sleep/timer state transitions, tray events, and windows. |
+
+`docs/`, `static/`, and the native icon directories hold supporting assets.
+Generated output, dependencies, and asset-only directories are outside this
+contract tree.
+
+## Global Invariants
+
+- Rust is the source of truth for activation and timer state. Startup enables
+  `PreventUserIdleDisplaySleep` without a timer; the frontend does not maintain
+  an independent sleep inhibitor.
+- Setting a timer enables Awake if needed and replaces its deadline. Cancelling
+  a timer leaves Awake enabled. Successful manual deactivation and expiry clear
+  activation and timer metadata; subsequent activation starts without a timer.
+- The timer UI selects minutes and invokes `set_timer_duration` with
+  `{ durationMs }` in milliseconds. Tauri maps that argument to Rust's
+  `duration_ms`; remaining time is a millisecond number or `null`.
+- The background worker queues one-second timer ticks onto the main thread.
+  Release the application-state lock before refreshing tray UI, and do not hold
+  a worker lock while waiting for main-thread UI work.
+- Tray left-button release toggles Awake. The menu is disabled on left-click
+  and opens on right-click through Tauri. Preserve the tray dependency's macOS
+  click-forwarding fix when changing dependency versions.
+- Routes are prerendered with server-side rendering disabled. Preserve
+  `%sveltekit.head%` and `%sveltekit.body%` in the document shell.
+- The native `timer` window loads `/timer`. Closing it is allowed; closing the
+  main window hides it so the tray application remains available.
+- Existing core/opener and updater/process capabilities target `main`. Passive
+  `startup-intro` and debug preview labels receive only event listening grants;
+  custom commands independently check callers. The timer retains its existing
+  capability configuration.
+- The application version is currently `0.3.5` in `package.json`, `Cargo.toml`,
+  and `tauri.conf.json`. Keep release metadata consistent across these files.
+
+## Global Side Effects
+
+- Native activation and deactivation change the operating system's user-idle
+  display sleep prevention. The process also updates tray icons/menu text and
+  creates, focuses, hides, or destroys webview windows.
+- The startup splash checks the configured GitHub updater endpoint. When an
+  update is available, it downloads and installs it, then relaunches the app.
+  The hidden main webview owns this work independently of the short cinematic
+  overlay. Download and installation keep the compact eye closed; Hide does
+  not cancel the update. Windows installation hands control to its external
+  installer; macOS/Linux request relaunch after successful installation.
+- Frontend animation and page styling mutate the webview DOM. The standalone
+  landing page separately creates its tiled background and updates hover
+  styling.
+- Development/check commands generate framework metadata and start tooling;
+  production builds write static frontend assets. Native packaging produces
+  platform bundles and requests signed updater artifacts.
+- The release workflow creates and publishes GitHub releases and uses configured
+  signing secrets for updater artifacts. The separate Pages workflow uploads
+  its configured artifact and requests deployment; its presence does not prove
+  a successful deployment or working hosted assets.
+- Activation timestamps and timers are in memory for the current process;
+  there is no application-state persistence layer in this implementation.
+
+## System Verification
+
+From the repository root:
+
+```sh
+pnpm check
+pnpm test:startup
+pnpm build
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+```
+
+The frontend startup tests use Node's built-in runner and a deterministic clock;
+they do not call native plugins. Native presentation-policy tests are portable; sleep-inhibitor regression
+tests run only on macOS without launching the UI or updater. They cover expiry/reactivation, manual toggles, timer
+replacement, and cancellation.
+
+Windows MSVC library tests require the scoped test-resource flag documented
+in the [native package guide](./src-tauri/README.md).
+
+Pull requests and pushes to `dev` run the three-platform
+[check workflow](./.github/workflows/check.yml). It does not create releases.
+
+For desktop integration, run `pnpm d`. Verify left-click off/on, the right-click
+status/timer menu, timer cancellation, and reactivation after expiry. Build and
+unit checks do not simulate native tray clicks or prove updater delivery.

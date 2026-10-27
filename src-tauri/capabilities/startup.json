@@ -1,0 +1,6 @@
+{
+  "identifier": "startup-presentation",
+  "description": "Passive startup visual events; no updater, process, or window mutation access",
+  "windows": ["startup-intro"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}
