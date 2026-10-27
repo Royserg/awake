@@ -112,3 +112,9 @@ Clippy runs with warnings denied. The new PR workflow checks macOS, Windows,
 and Linux without updater secrets or release publishing. Local macOS checks do
 not establish that those new remote CI jobs have passed; run them before merge.
 The existing native/platform and signed-updater acceptance limits above remain.
+
+The first Windows CI run compiled and passed Clippy, then exposed Tauri's
+`STATUS_ENTRYPOINT_NOT_FOUND` library-test manifest issue. Windows CI opts into
+linking the existing generated app resource for `cargo test --lib`; normal
+application/release builds retain their default manifest handling. See the
+[native package guide](../src-tauri/README.md) for the scoped local command.

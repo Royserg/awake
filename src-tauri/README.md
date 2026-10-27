@@ -4,7 +4,9 @@
 
 This package builds Awake's Rust desktop runtime and connects it to the
 frontend through Tauri. [build.rs](./build.rs) delegates build integration to
-`tauri_build::build()`. [Cargo.toml](./Cargo.toml) defines the `awake` package
+`tauri_build::build()`. Windows MSVC library tests opt into linking the same
+Common Controls manifest with `AWAKE_WINDOWS_TEST_RESOURCES=1`; use this only
+with `cargo test --lib` to avoid duplicate resources in binary targets. [Cargo.toml](./Cargo.toml) defines the `awake` package
 and the `awake_lib` library, emitted as `staticlib`, `cdylib`, and `rlib`.
 
 ## Interface
@@ -70,3 +72,15 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
 Frontend integration checks from the repository root are `pnpm check` and
 `pnpm build`. The Rust test command validates library behavior; native tray and
 window interactions also require running the desktop application.
+
+On Windows PowerShell, run library tests with the Tauri test-resource workaround:
+
+```powershell
+$env:AWAKE_WINDOWS_TEST_RESOURCES = '1'
+try { cargo test --manifest-path src-tauri/Cargo.toml --locked --lib }
+finally { Remove-Item Env:AWAKE_WINDOWS_TEST_RESOURCES }
+```
+
+CI scopes this flag to its library-test step; normal application and release
+builds retain Tauri's default resource handling. The workaround covers Tauri's
+[Windows library-test manifest issue](https://github.com/tauri-apps/tauri/issues/14580).

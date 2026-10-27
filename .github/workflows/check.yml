@@ -49,6 +49,8 @@ jobs:
       - name: Check Rust lints
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - name: Test native policy and state
+        env:
+          AWAKE_WINDOWS_TEST_RESOURCES: ${{ runner.os == 'Windows' && '1' || '' }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
       - name: Check release command boundary
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked --release --lib

@@ -614,12 +614,14 @@ relative to the repository root.
 | 43 | `.github/workflows/check.yml` | **Create during merge preparation.** Run frontend checks/build/tests and native formatting/lints/tests/release checks on macOS, Windows, and Linux for PRs and dev pushes. Do not sign or publish. |
 | 44 | `tsconfig.json` | **Modify during merge cleanup.** Reject unused locals/parameters in frontend code and the inherited startup test graph. |
 | 45 | `src/lib/startup/pixel-eye.ts` | **Create during modularity cleanup.** Move the single canonical renderer/artwork implementation into the shared library. Keep the old route module as explicit compatibility exports, remove its stale commented-out usage block, and test export identity. Shared visuals no longer depend on route internals. |
+| 46 | `src-tauri/build.rs` | **Modify during release validation.** Under the explicit Windows MSVC library-test flag, link Tauri's existing generated resource into the test executable to cover the upstream Common Controls manifest gap. Keep normal app/release resource handling unchanged. |
+
 
 
 
 
 Existing `src/routes/+layout.ts`, `src/app.html`, timer files, icon assets,
-`pnpm-lock.yaml`, `build.rs`, and release workflows require no changes for this
+`pnpm-lock.yaml`, and release workflows require no changes for this
 implementation. Frontend script additions do not require pnpm lockfile
 regeneration; the new native direct dependencies do require the Cargo lockfile
 update listed above. If implementation reveals another necessary file, update this

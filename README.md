@@ -162,6 +162,9 @@ they do not call native plugins. Native presentation-policy tests are portable; 
 tests run only on macOS without launching the UI or updater. They cover expiry/reactivation, manual toggles, timer
 replacement, and cancellation.
 
+Windows MSVC library tests require the scoped test-resource flag documented
+in the [native package guide](./src-tauri/README.md).
+
 Pull requests and pushes to `dev` run the three-platform
 [check workflow](./.github/workflows/check.yml). It does not create releases.
 
