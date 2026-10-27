@@ -1,0 +1,6 @@
+{
+  "identifier": "startup-preview",
+  "description": "Debug preview events; native commands independently enforce debug builds and caller ownership",
+  "windows": ["startup-preview", "startup-preview-surface"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

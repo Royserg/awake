@@ -11,7 +11,9 @@
     "d": "pnpm tauri dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.startup-tests.json",
+    "test:startup": "node --experimental-strip-types --test tests/startup/controller.test.ts tests/startup/frame.test.ts tests/startup/preview.test.ts tests/startup/artwork.test.ts tests/startup/native-presentation.test.ts",
+    "preview:intro": "vite dev --host 127.0.0.1 --open /preview",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri"
   },

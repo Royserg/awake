@@ -19,6 +19,7 @@ xattr -cr /Applications/Awake.app
 - Toggle sleep prevention with a single click
 - Visual indicator in system tray
 - Timer for keeping system awake for a period of time
+- A 1.75-second pixel-eye opening on every launch, with a compact closed-eye wait during updates
 
 ## Usage
 
@@ -30,6 +31,12 @@ xattr -cr /Applications/Awake.app
 
 Requires Node.js 22.17 or newer (CI uses Node.js 24), pnpm, and a current stable Rust toolchain.
 Frontend configuration lives in `vite.config.js` using SvelteKit 3.
+
+Run `pnpm preview:intro` for the pixel-eye animation workbench: replay, pause,
+scrub, tune the shock wave, and rehearse simulated update transitions. This
+browser preview simulates updates. In a debug desktop build, right-click the
+tray and choose **Intro Preview**, then enable **Native desktop replay** for
+actual desktop surfaces. See the [preview guide](./docs/startup-preview.md).
 
 Built with:
 
@@ -58,6 +65,7 @@ production assets are written to `build/`.
 | [tsconfig.json](./tsconfig.json) | Extends `$app/tsconfig` with strict TypeScript and JavaScript checking and bundler module resolution. |
 | [index.html](./index.html) | Provides the standalone landing page and animated tiled background. Its Download link currently targets `#`. |
 | [justfile](./justfile) | Contains development and icon shortcuts, plus legacy build/database recipes. `b` refers to an absent `t:build` package script; SQLx recipes require tooling and configuration not established by the current manifests. |
+| [PR checks](./.github/workflows/check.yml) | Checks frontend types/unused code, tests/build, Rust formatting/lints/tests, and release handlers on macOS, Windows, and Linux without signing or publishing. |
 | [Release workflow](./.github/workflows/build-prod.yml) | A push to `prod` creates a draft release, builds macOS ARM/Intel, Linux, and Windows artifacts, then publishes after the build job succeeds. Release names and tags come from `package.json`. |
 | [Pages workflow](./.github/workflows/static.yml) | A push to `prod` or manual dispatch requests a GitHub Pages deployment, with `./index.html` configured as the upload path. |
 
@@ -107,9 +115,10 @@ contract tree.
   `%sveltekit.head%` and `%sveltekit.body%` in the document shell.
 - The native `timer` window loads `/timer`. Closing it is allowed; closing the
   main window hides it so the tray application remains available.
-- Capability files currently target `main`. Core/opener permissions and desktop
-  updater/process permissions are declared separately; the dynamically created
-  timer window is not explicitly listed in either file.
+- Existing core/opener and updater/process capabilities target `main`. Passive
+  `startup-intro` and debug preview labels receive only event listening grants;
+  custom commands independently check callers. The timer retains its existing
+  capability configuration.
 - The application version is currently `0.3.3` in `package.json`, `Cargo.toml`,
   and `tauri.conf.json`. Keep release metadata consistent across these files.
 
@@ -120,8 +129,10 @@ contract tree.
   creates, focuses, hides, or destroys webview windows.
 - The startup splash checks the configured GitHub updater endpoint. When an
   update is available, it downloads and installs it, then relaunches the app.
-  With no update or after a caught update error, it hides the splash after a
-  one-second delay.
+  The hidden main webview owns this work independently of the short cinematic
+  overlay. Download and installation keep the compact eye closed; Hide does
+  not cancel the update. Windows installation hands control to its external
+  installer; macOS/Linux request relaunch after successful installation.
 - Frontend animation and page styling mutate the webview DOM. The standalone
   landing page separately creates its tiled background and updates hover
   styling.
@@ -141,14 +152,18 @@ From the repository root:
 
 ```sh
 pnpm check
+pnpm test:startup
 pnpm build
 cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
 ```
 
-The frontend package defines no test script. The current native regression
-tests run only on macOS and exercise the real sleep inhibitor without launching
-the UI or updater. They cover expiry/reactivation, manual toggles, timer
+The frontend startup tests use Node's built-in runner and a deterministic clock;
+they do not call native plugins. Native presentation-policy tests are portable; sleep-inhibitor regression
+tests run only on macOS without launching the UI or updater. They cover expiry/reactivation, manual toggles, timer
 replacement, and cancellation.
+
+Pull requests and pushes to `dev` run the three-platform
+[check workflow](./.github/workflows/check.yml). It does not create releases.
 
 For desktop integration, run `pnpm d`. Verify left-click off/on, the right-click
 status/timer menu, timer cancellation, and reactivation after expiry. Build and

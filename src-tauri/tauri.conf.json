@@ -18,7 +18,11 @@
         "height": 300,
         "decorations": false,
         "resizable": false,
-        "center": true
+        "center": true,
+        "visible": false,
+        "focus": false,
+        "skipTaskbar": true,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

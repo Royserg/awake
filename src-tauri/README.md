@@ -14,7 +14,9 @@ and the `awake_lib` library, emitted as `staticlib`, `cdylib`, and `rlib`.
   implementations are private Rust functions annotated for Tauri IPC.
 - [Tauri configuration](./tauri.conf.json): product `awake`, identifier
   `com.awake.app`, and application version `0.3.3`. The configured `main`
-  window is centered, 300 by 300, undecorated, and nonresizable.
+  window is centered, 300 by 300, undecorated, nonresizable, initially hidden,
+  unfocused, omitted from the taskbar, and requests disabled background throttling.
+  Separate dynamic windows provide transparent cinematic and debug preview surfaces.
 - Development invokes `pnpm dev` and loads `http://localhost:1420`. Production
   invokes `pnpm build` and consumes frontend output from `../build`.
 - [Default capability](./capabilities/default.json): applies to `main` and
@@ -28,14 +30,20 @@ and the `awake_lib` library, emitted as `staticlib`, `cdylib`, and `rlib`.
 - The runtime depends on Tauri with `tray-icon` and `image-png` features,
   `nosleep`, and the opener, process, and updater plugins. Plugin initialization
   belongs to the runtime; configuration alone does not grant frontend access.
-- Both capability files target `main`; neither explicitly lists the dynamically
+- The existing default and desktop capability files target `main`; neither explicitly lists the dynamically
   created `timer` window. Desktop updater and process access comes from the
   desktop capability, alongside the default capability's core and opener access.
+- [Startup capability](./capabilities/startup.json) grants event listen/unlisten
+  only to `startup-intro`; [preview capability](./capabilities/startup-preview.json)
+  grants the same to the two exact debug labels. Preview IPC handlers are absent
+  from release builds. All custom commands verify callers in Rust.
 - Content Security Policy is explicitly `null` in the application configuration.
 - Runtime state and transitions follow the [native runtime contract](./src/README.md):
   startup activates sleep prevention without a timer; setting a timer activates
   and resets its deadline; cancellation preserves activation; successful
   deactivation clears both activation and timer metadata.
+- Target-specific GTK 0.18.2 and Windows 0.62.2 direct dependencies expose
+  focus-preserving compact show helpers; existing locked versions are retained.
 - Bundling is enabled for all targets, with platform icon paths and updater
   artifact generation configured.
 
