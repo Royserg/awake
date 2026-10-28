@@ -19,6 +19,7 @@ xattr -cr /Applications/Awake.app
 - Toggle sleep prevention with a single click
 - Visual indicator in system tray
 - Timer for keeping system awake for a period of time
+- Cursor patrolling with editable points across monitors on macOS and Windows
 - A 1.75-second pixel-eye opening on every launch, with a compact closed-eye wait during updates
 
 ## Usage
@@ -26,6 +27,14 @@ xattr -cr /Applications/Awake.app
 - Left-click the tray icon to toggle sleep prevention
 - Right-click to see the awake status, set or cancel a timer, or quit
 - When a timer finishes, sleep prevention turns off. Left-click to turn it on again without a timer.
+
+## Cursor Patrolling
+
+Right-click the tray icon and choose **Cursor Patrolling…**. Click the overlays to add 2–256 points on any connected display, drag points to adjust them, and choose a whole-second pause (1–3600 seconds; default 10). Press **Start** to follow the numbered loop with smooth 500 ms movement between points. Start enables Awake when needed and preserves an existing Awake timer.
+
+**Esc**, physical mouse/trackpad movement, a mouse button, or **Stop Cursor Patrolling** stops movement and leaves Awake active. Turning Awake off or reaching its sleep deadline stops patrol before releasing sleep prevention. The app never restores the cursor to an earlier position. A display/session/input-access change also stops movement; a display change requires checking the points before restarting. Routes stay in memory until the app exits. macOS may require **Input Monitoring** access; use the explicit access button in setup and reopen setup after the OS interaction.
+
+The macOS and Windows adapters are implemented. Linux keeps ordinary sleep prevention and shows patrol as unavailable. Live multi-monitor, input takeover, confinement, and session-transition acceptance still needs desktop testing; see [validation](docs/cursor-patrolling/validation.md).
 
 ## Development
 
@@ -171,3 +180,5 @@ Pull requests and pushes to `dev` run the three-platform
 For desktop integration, run `pnpm d`. Verify left-click off/on, the right-click
 status/timer menu, timer cancellation, and reactivation after expiry. Build and
 unit checks do not simulate native tray clicks or prove updater delivery.
+
+Cursor patrol checks: `pnpm test:patrol`, `pnpm check`, `pnpm test:startup`, `pnpm build`, `cargo test --manifest-path src-tauri/Cargo.toml --locked --lib`, and `cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings`. Native tests use fake input/time/position ports; they do not move the cursor.

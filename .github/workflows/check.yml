@@ -1,6 +1,7 @@
 name: Checks
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [dev]
@@ -42,6 +43,8 @@ jobs:
         run: pnpm check
       - name: Test startup and replay
         run: pnpm test:startup
+      - name: Test cursor patrol protocol
+        run: pnpm test:patrol
       - name: Build static frontend
         run: pnpm build
       - name: Check Rust formatting

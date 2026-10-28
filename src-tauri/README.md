@@ -84,3 +84,9 @@ finally { Remove-Item Env:AWAKE_WINDOWS_TEST_RESOURCES }
 CI scopes this flag to its library-test step; normal application and release
 builds retain Tauri's default resource handling. The workaround covers Tauri's
 [Windows library-test manifest issue](https://github.com/tauri-apps/tauri/issues/14580).
+
+## Cursor patrol bindings and capability
+
+`src/patrol` implements macOS and Windows native input/display adapters behind a pure controller and route engine. Target-specific pinned objc2/framework bindings and Windows 0.62.2 features remain in Cargo.toml; Linux does not start a listener. Windows disables Tao raw device capture with DeviceEventFilter::Always before the owned Raw Input sink starts; normal webview input remains enabled.
+
+`capabilities/patrol.json` grants only event listen/unlisten to `patrol-*` windows on macOS/Windows. Native code creates, places, hides and destroys every overlay; actual registered webview identity gates its commands. Existing main/timer capabilities and bundle configuration are preserved. The process command adapter preserves the process plugin namespace/capability boundary while coordinating exit/restart with native stopping.

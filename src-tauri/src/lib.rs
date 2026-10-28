@@ -1,3 +1,4 @@
+mod patrol;
 mod startup_presentation;
 
 use nosleep::{NoSleep, NoSleepType};
@@ -26,41 +27,29 @@ fn show_splash(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn activate(
-    app: tauri::AppHandle,
-    window: WebviewWindow,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<String, String> {
+async fn activate(app: tauri::AppHandle, window: WebviewWindow) -> Result<String, String> {
     startup_presentation::allowed_app_caller(&window)?;
-    state.lock().unwrap().activate()?;
+    patrol::awake(app.clone(), patrol::AwakeOp::Activate).await?;
     queue_tray_refresh(&app);
     Ok("activated".to_string())
 }
 
 #[tauri::command]
-fn deactivate(
-    app: tauri::AppHandle,
-    window: WebviewWindow,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<String, String> {
+async fn deactivate(app: tauri::AppHandle, window: WebviewWindow) -> Result<String, String> {
     startup_presentation::allowed_app_caller(&window)?;
-    state.lock().unwrap().deactivate()?;
+    patrol::awake(app.clone(), patrol::AwakeOp::Deactivate).await?;
     queue_tray_refresh(&app);
     Ok("deactivated".to_string())
 }
 
 #[tauri::command]
-fn set_timer_duration(
+async fn set_timer_duration(
     app: tauri::AppHandle,
     duration_ms: u64,
     window: WebviewWindow,
-    state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
     startup_presentation::allowed_app_caller(&window)?;
-    state
-        .lock()
-        .unwrap()
-        .set_timer(Duration::from_millis(duration_ms))?;
+    patrol::awake(app.clone(), patrol::AwakeOp::SetTimer(duration_ms)).await?;
     queue_tray_refresh(&app);
 
     // Close the timer window
@@ -71,13 +60,9 @@ fn set_timer_duration(
 }
 
 #[tauri::command]
-fn cancel_timer(
-    app: tauri::AppHandle,
-    window: WebviewWindow,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+async fn cancel_timer(app: tauri::AppHandle, window: WebviewWindow) -> Result<(), String> {
     startup_presentation::allowed_app_caller(&window)?;
-    state.lock().unwrap().timer_duration = None;
+    patrol::awake(app.clone(), patrol::AwakeOp::CancelTimer).await?;
     queue_tray_refresh(&app);
     Ok(())
 }
@@ -227,6 +212,7 @@ fn format_remaining(elapsed: Duration, timer_duration: Duration) -> String {
 struct MenuItems {
     status: MenuItem<tauri::Wry>,
     timer: MenuItem<tauri::Wry>,
+    patrol: MenuItem<tauri::Wry>,
 }
 
 // Track previous display text for change detection
@@ -315,6 +301,9 @@ fn refresh_tray(app: &tauri::AppHandle) {
     let mut display = display_state.lock().expect("Failed to lock DisplayState");
     update_status_item_if_changed(&menu_items, &mut display, &snapshot);
     update_timer_item_if_changed(&menu_items, &mut display, &snapshot);
+    let (patrol_text, enabled) = patrol::menu_text(app);
+    let _ = menu_items.patrol.set_text(patrol_text);
+    let _ = menu_items.patrol.set_enabled(enabled);
 
     if display.last_no_sleep_active != Some(snapshot.no_sleep_active) {
         if let Some(tray) = app.tray_by_id("main") {
@@ -348,6 +337,12 @@ pub fn run() {
         cancel_timer,
         get_timer_remaining_ms,
         open_timer_window,
+        patrol::get_patrol_setup,
+        patrol::update_patrol_setup,
+        patrol::start_patrol,
+        patrol::cancel_patrol_setup,
+        patrol::stop_patrol,
+        patrol::request_patrol_permissions,
         startup_presentation::startup_context,
         startup_presentation::start_intro,
         startup_presentation::intro_config,
@@ -372,6 +367,12 @@ pub fn run() {
         cancel_timer,
         get_timer_remaining_ms,
         open_timer_window,
+        patrol::get_patrol_setup,
+        patrol::update_patrol_setup,
+        patrol::start_patrol,
+        patrol::cancel_patrol_setup,
+        patrol::stop_patrol,
+        patrol::request_patrol_permissions,
         startup_presentation::startup_context,
         startup_presentation::start_intro,
         startup_presentation::intro_config,
@@ -380,12 +381,31 @@ pub fn run() {
         startup_presentation::show_compact,
         startup_presentation::hide_compact
     ];
-    tauri::Builder::default()
-        .plugin(tauri_plugin_process::init())
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.device_event_filter(tauri::DeviceEventFilter::Always);
+    builder
+        .plugin(patrol::process_plugin())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .on_page_load(|window, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+                && window.label().starts_with("patrol-")
+            {
+                patrol::page_loaded(window.app_handle(), window.label());
+            }
+        })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed)
+                && window.label().starts_with("patrol-")
+            {
+                patrol::window_destroyed(window.app_handle(), window.label());
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if patrol::window_closed(window.app_handle(), window.label()) {
+                    api.prevent_close();
+                    return;
+                }
                 match window.label() {
                     "main" => {
                         startup_presentation::hide_main(window.app_handle());
@@ -403,6 +423,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             startup_presentation::setup(app.handle());
+            patrol::setup(app.handle());
 
             // Status item (shows duration when active)
             let status_i = MenuItem::with_id(app, "status", "● Awake (0)", false, None::<&str>)?;
@@ -410,6 +431,8 @@ pub fn run() {
             // Timer item (shows remaining time or "Set Timer...")
             let timer_i = MenuItem::with_id(app, "timer", "Set Timer", true, None::<&str>)?;
 
+            let patrol_i =
+                MenuItem::with_id(app, "patrol", "Cursor Patrolling…", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let separator_i = PredefinedMenuItem::separator(app)?;
 
@@ -423,6 +446,7 @@ pub fn run() {
                         &status_i,
                         &separator_i,
                         &timer_i,
+                        &patrol_i,
                         &separator_i,
                         &preview_i,
                         &quit_i,
@@ -433,13 +457,21 @@ pub fn run() {
             #[cfg(not(debug_assertions))]
             let menu = Menu::with_items(
                 app,
-                &[&status_i, &separator_i, &timer_i, &separator_i, &quit_i],
+                &[
+                    &status_i,
+                    &separator_i,
+                    &timer_i,
+                    &patrol_i,
+                    &separator_i,
+                    &quit_i,
+                ],
             )?;
 
             // Store menu items for later updates
             let menu_items = Arc::new(MenuItems {
                 status: status_i,
                 timer: timer_i,
+                patrol: patrol_i,
             });
 
             // Track display state for change detection
@@ -471,18 +503,7 @@ pub fn run() {
                         startup_presentation::dismiss_intro(app);
                         match (button, button_state) {
                             (MouseButton::Left, MouseButtonState::Up) => {
-                                let result = {
-                                    let state = app.state::<Mutex<AppState>>();
-                                    let mut state = state.lock().expect("Failed to lock AppState");
-                                    if state.no_sleep_active {
-                                        state.deactivate()
-                                    } else {
-                                        state.activate()
-                                    }
-                                };
-                                if let Err(error) = result {
-                                    eprintln!("Failed to toggle Awake: {error}");
-                                }
+                                patrol::queue_awake(app, patrol::AwakeOp::Toggle, None);
                                 refresh_tray(app);
                             }
                             (MouseButton::Right, MouseButtonState::Down) => {
@@ -495,6 +516,7 @@ pub fn run() {
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     #[cfg(debug_assertions)]
                     "intro_preview" => startup_presentation::open_preview(app),
+                    "patrol" => patrol::menu(app),
                     "timer" => {
                         if let Some(window) = app.get_webview_window("timer") {
                             let _ = window.show();
@@ -505,7 +527,7 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        app.exit(0);
+                        patrol::quit(app);
                     }
                     _ => {}
                 })
@@ -521,13 +543,7 @@ pub fn run() {
                 let handle = app_handle.clone();
                 if app_handle
                     .run_on_main_thread(move || {
-                        {
-                            let state = handle.state::<Mutex<AppState>>();
-                            let mut state = state.lock().expect("Failed to lock AppState");
-                            if let Err(error) = state.expire_timer(Instant::now()) {
-                                eprintln!("Failed to stop Awake after timer expiry: {error}");
-                            }
-                        }
+                        patrol::refresh(&handle);
                         refresh_tray(&handle);
                     })
                     .is_err()
@@ -542,7 +558,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                if *code == Some(tauri::RESTART_EXIT_CODE) {
+                    patrol::invalidate_for_exit(app);
+                } else if !patrol::exit_allowed(app) {
+                    api.prevent_exit();
+                    patrol::request_exit(app, code.unwrap_or(0));
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
+                patrol::invalidate_for_exit(app);
                 startup_presentation::shutdown(app);
             }
         });

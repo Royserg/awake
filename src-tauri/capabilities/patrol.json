@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "patrol",
+  "description": "Native-owned cursor patrol setup overlays may subscribe to their targeted state notifications.",
+  "windows": ["patrol-*"],
+  "platforms": ["macOS", "windows"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

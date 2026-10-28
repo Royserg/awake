@@ -25,3 +25,7 @@ This subtree contains Awake's SvelteKit document shell and frontend routes. Taur
 ## Verification
 
 From the repository root, run `pnpm check`, `pnpm test:startup`, and `pnpm build`.
+
+## Cursor patrol editor
+
+`lib/patrol-state.ts` owns validated wire types, monotonic snapshots and the per-source asynchronous edit queue. `lib/patrol.ts` supplies the Tauri transport; `routes/patrol` renders native-owned monitor overlays. Cursor execution, global cancellation, timers and window lifetime belong to Rust. Run `pnpm test:patrol` for the pure queue tests.

@@ -39,3 +39,7 @@ This directory supplies the statically generated SvelteKit pages embedded by Tau
 ## Verification
 
 From the repository root, run `pnpm check`, `pnpm test:startup`, and `pnpm build`.
+
+## `/patrol`
+
+Native Rust creates one input-taking overlay per canonical monitor, with one control panel. The route renders in native desktop units inside each caller's measured mapping; markers and controls retain CSS sizing. All overlays share one ordered draft. Pointer capture freezes the source drawing rectangle and submits the actual release even outside that window. Start requires the native all-overlay edit barrier. This route uses only the patrol transport/events; teardown cannot stop a committed run.

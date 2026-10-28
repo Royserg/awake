@@ -143,3 +143,11 @@ sets nonfocusable, Windows uses a scoped UI-thread CBT hook around normal Tauri
 show with forwarding-only cleanup retries, and Linux retains GTK focus-on-map
 false through asynchronous mapping. GTK accept-focus stays true. Platform-native
 acceptance beyond the local macOS smoke checks remains pending.
+
+## Native cursor patrol coordination
+
+`patrol/mod.rs` adds `get_patrol_setup`, `update_patrol_setup`, `start_patrol`, `cancel_patrol_setup`, `stop_patrol`, and `request_patrol_permissions` to both handler lists. Flat request bodies are decoded inside the handlers, so malformed requests receive typed errors. Only a registered current overlay can act; the controller additionally checks setup/layout revisions, control role, action identity and run generation.
+
+The main-thread coordinator owns window, Awake and timer effects. Off cancels movement before the fallible inhibitor release, deferring that release until an in-flight synchronous native call returns and acknowledges stop. Timer changes share that ordering and publish actual monotonic deadlines. Native callbacks never wait for AppState or UI work. The worker checks 100 ms observer/availability leases during travel and pauses, immediately before each native position call, and checks the current Awake deadline independently of UI refresh.
+
+Registered-overlay close/reload cancels setup; programmatic destruction is tracked separately. Cleanup failures retain a closing state instead of claiming success. Exit and process-plugin restart allow up to two seconds of cleanup. Tauri's reserved restart exit cannot be prevented (including installer-owned restarts), so that fallback synchronously invalidates native movement before process exit. Startup shutdown and its debug-only preview boundary remain intact. See `patrol/README.md` and the native validation record.
