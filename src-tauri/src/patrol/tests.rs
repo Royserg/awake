@@ -1292,3 +1292,127 @@ fn getters_do_not_emit_state_events_or_create_a_refetch_feedback_loop() {
         .unwrap();
     assert!(!core.publication_changed());
 }
+
+#[test]
+fn windows_registration_null_probe_accepts_documented_insufficient_buffer_result() {
+    use super::platform::{read_raw_input_registrations, registration_read, RegistrationRead};
+    assert!(matches!(
+        registration_read(u32::MAX, 2, true, true),
+        Some(RegistrationRead::Required(2))
+    ));
+    assert!(matches!(
+        registration_read(u32::MAX, 3, false, true),
+        Some(RegistrationRead::Required(3))
+    ));
+    assert!(registration_read(u32::MAX, 2, true, false).is_none());
+    assert!(matches!(
+        registration_read(2, 2, false, false),
+        Some(RegistrationRead::Filled(2))
+    ));
+    let mut calls = 0;
+    let registrations = read_raw_input_registrations::<u8>(|buffer| {
+        calls += 1;
+        if let Some(buffer) = buffer {
+            assert_eq!(buffer.len(), 2);
+            buffer.copy_from_slice(&[2, 6]);
+            Ok(registration_read(2, 2, false, false).unwrap())
+        } else {
+            Ok(registration_read(u32::MAX, 2, true, true).unwrap())
+        }
+    })
+    .unwrap();
+    assert_eq!(registrations, vec![2, 6]);
+    assert_eq!(calls, 2);
+}
+
+#[test]
+fn windows_empty_registration_probe_does_not_make_a_zero_length_buffer_call() {
+    use super::platform::{read_raw_input_registrations, registration_read};
+    for copied in [0, u32::MAX] {
+        let registrations = read_raw_input_registrations::<u8>(|buffer| {
+            assert!(buffer.is_none());
+            Ok(registration_read(copied, 0, true, copied == u32::MAX).unwrap())
+        })
+        .unwrap();
+        assert!(registrations.is_empty());
+    }
+}
+
+#[test]
+fn windows_registration_query_retries_a_size_race_and_uses_only_written_entries() {
+    use super::platform::{read_raw_input_registrations, RegistrationRead};
+    let mut calls = 0;
+    let registrations = read_raw_input_registrations::<u8>(|buffer| {
+        calls += 1;
+        match calls {
+            1 => {
+                assert!(buffer.is_none());
+                Ok(RegistrationRead::Required(1))
+            }
+            2 => {
+                assert_eq!(buffer.unwrap().len(), 1);
+                Ok(RegistrationRead::Required(3))
+            }
+            3 => {
+                let buffer = buffer.unwrap();
+                assert_eq!(buffer.len(), 3);
+                buffer[0] = 2;
+                buffer[1] = 6;
+                Ok(RegistrationRead::Filled(2))
+            }
+            _ => panic!("Unexpected query"),
+        }
+    })
+    .unwrap();
+    assert_eq!(registrations, vec![2, 6]);
+    assert_eq!(calls, 3);
+}
+
+#[test]
+fn windows_registration_query_preserves_real_errors_instead_of_reporting_ownership() {
+    use super::platform::{read_raw_input_registrations, RegistrationRead};
+    let error = Failure::new(
+        ErrorCode::NativeUnavailable,
+        "Cannot query Awake's Raw Input registrations (Windows error 5)",
+    );
+    assert_eq!(
+        read_raw_input_registrations::<u8>(|_| Err(error.clone())).unwrap_err(),
+        error
+    );
+    let actual = read_raw_input_registrations::<u8>(|buffer| {
+        if buffer.is_none() {
+            Ok(RegistrationRead::Required(2))
+        } else {
+            Err(error.clone())
+        }
+    })
+    .unwrap_err();
+    assert_eq!(actual, error);
+}
+
+#[test]
+fn windows_registration_enumeration_is_bounded_and_rejects_invalid_counts() {
+    use super::platform::{read_raw_input_registrations, RegistrationRead};
+    let mut calls = 0;
+    assert!(read_raw_input_registrations::<u8>(|_| {
+        calls += 1;
+        Ok(RegistrationRead::Required(4097))
+    })
+    .is_err());
+    assert_eq!(calls, 1);
+    calls = 0;
+    assert!(read_raw_input_registrations::<u8>(|_| {
+        calls += 1;
+        Ok(RegistrationRead::Required(calls))
+    })
+    .is_err());
+    assert_eq!(calls, 4);
+    assert!(
+        read_raw_input_registrations::<u8>(|buffer| if buffer.is_none() {
+            Ok(RegistrationRead::Required(1))
+        } else {
+            Ok(RegistrationRead::Filled(2))
+        })
+        .is_err()
+    );
+}

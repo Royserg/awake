@@ -74,7 +74,7 @@ The initial negative observation predates the later phase-counter/reporting addi
 | ID | Case | Status | Observation / prerequisite |
 | --- | --- | --- | --- |
 | WIN-1 | Actual Windows adapter/dependency compilation | Passed (compile only) | Installed Rust x86_64-pc-windows-gnu std; Cargo check and Clippy -D warnings compile the actual model/engine/platform source with windows=0.62.2 and the declared feature set. The temporary harness stubs only the Tauri WebviewWindow type/typed hwnd accessor; it executes no Windows API. A second harness also compiles/lints the complete actual patrol module (coordinator, IPC, overlays, backend) against real Tauri 2.12.5, stubbing only Awake/tray effects. The complete Windows application still needs its CI/desktop build. |
-| WIN-2 | Tao DeviceEventFilter::Always handoff and owned Raw Input sink | Not run | Requires Windows Tauri 2.12.5/Tao 0.37.2 runtime; registration source is not a handoff result. |
+| WIN-2 | Tao DeviceEventFilter::Always handoff and owned Raw Input sink | Failed (user report; fix awaiting retest) | On 2026-10-28 the user could not start patrol on their work Windows machine: "Another component owns mouse or keyboard Raw Input". A confirmed enumeration/error-reporting bug was corrected locally; successful runtime handoff and startup still require a rebuilt-app retest. |
 | WIN-3 | SetCursorPos input separation; global Esc and physical mouse/trackpad takeover during travel/pauses | Not run | No Windows desktop. Include precision-touchpad zero-device-handle cases. |
 | WIN-4 | Stop acknowledgment, in-flight emission, no deferred movement and resource ownership cleanup | Not run | No Windows desktop. |
 | WIN-5 | All-monitor overlays and captured release on mixed scales/negative origins/gaps/mirrors | Not run | No Windows desktop or monitor configuration. |
@@ -140,3 +140,13 @@ Final local bundle executable SHA-256: `475aec330b328ee3429b12f4cc307345ea3c5f60
 ## User application smoke test — 2026-10-28
 
 The user tested the built macOS application and confirmed that the cursor moves between the configured points, then reported that the functionality seems to be working and authorized committing/pushing to dev. This records a successful basic live movement smoke test. It does not establish the unmeasured timing, permission-loss, multi-monitor or Windows cases above. Teams presence behavior has not been verified.
+
+## Windows startup investigation — 2026-10-28
+
+The user reported that patrol could not start on a work Windows machine. The setup showed “Enable input access / Retry” and “Another component owns mouse or keyboard Raw Input.” OS build, device layout and actual registration owner were not captured; the agent still has no Windows desktop access. This establishes a failed startup smoke test, not a measured input or company-policy diagnosis.
+
+Source inspection found a definite bug in the Windows registration query. `GetRegisteredRawInputDevices(NULL, &count, ...)` uses `ERROR_INSUFFICIENT_BUFFER` to report the required buffer size. The adapter treated that documented size result as a failure and used the same ownership error for any enumeration failure. It could also submit an empty buffer for zero registrations. Microsoft documents both [enumeration return values](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getregisteredrawinputdevices) and [registration scope within the calling process](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerrawinputdevices). This message does not establish a denied OS mouse permission or interference from a separate application.
+
+The correction accepts the documented size-probe response, returns an empty snapshot directly for zero registrations, retries bounded size races, validates copied counts and retains actual Windows error codes for other failures. Startup, health and cleanup use the same query. Actual conflicting registrations still block startup; ownership is never silently stolen. The UI says “Enable input access” only for permissionRequired and “Retry input monitoring” for other native availability failures.
+
+Verification: 50 Rust library tests pass (including five new registration-query regression tests), 14 patrol frontend tests pass, Svelte/TypeScript checks pass, and Clippy passes for the Mac application and the actual full patrol module against real Windows/Tauri dependencies. These checks do not run the Windows API on a desktop. A rebuilt Windows application must be retested before changing WIN-2 to Passed.

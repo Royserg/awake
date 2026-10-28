@@ -14,6 +14,67 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+/// Windows enumeration separates the size probe from a populated snapshot. Both a null probe
+/// and a concurrent registration change may report the required size instead of copying data.
+#[cfg(any(windows, test))]
+pub enum RegistrationRead {
+    Required(usize),
+    Filled(usize),
+}
+
+#[cfg(any(windows, test))]
+pub fn registration_read(
+    copied: u32,
+    required: u32,
+    probe: bool,
+    insufficient_buffer: bool,
+) -> Option<RegistrationRead> {
+    if copied == u32::MAX {
+        insufficient_buffer.then_some(RegistrationRead::Required(required as usize))
+    } else if probe {
+        Some(RegistrationRead::Required(required as usize))
+    } else {
+        Some(RegistrationRead::Filled(copied as usize))
+    }
+}
+
+#[cfg(any(windows, test))]
+pub fn read_raw_input_registrations<T: Default + Clone>(
+    mut query: impl FnMut(Option<&mut [T]>) -> Result<RegistrationRead, Failure>,
+) -> Result<Vec<T>, Failure> {
+    let invalid = || {
+        Failure::new(
+            ErrorCode::NativeUnavailable,
+            "Invalid Raw Input registration query result",
+        )
+    };
+    let mut count = match query(None)? {
+        RegistrationRead::Required(count) => count,
+        RegistrationRead::Filled(_) => return Err(invalid()),
+    };
+    for _ in 0..3 {
+        if count > 4096 {
+            return Err(invalid());
+        }
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let mut devices = vec![T::default(); count];
+        match query(Some(&mut devices))? {
+            RegistrationRead::Filled(written) if written <= devices.len() => {
+                devices.truncate(written);
+                return Ok(devices);
+            }
+            RegistrationRead::Filled(_) => return Err(invalid()),
+            RegistrationRead::Required(required) => count = required,
+        }
+    }
+    Err(Failure::new(
+        ErrorCode::NativeUnavailable,
+        "Awake's Raw Input registrations kept changing; retry input monitoring",
+    ))
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeDisplay {
     pub identity: String,

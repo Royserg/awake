@@ -328,37 +328,36 @@ struct Context {
     shared: Arc<Shared>,
     absolute: HashMap<usize, (i32, i32)>,
 }
-fn registered() -> Option<Vec<RAWINPUTDEVICE>> {
-    unsafe {
-        let mut count = 0;
-        if GetRegisteredRawInputDevices(None, &mut count, size_of::<RAWINPUTDEVICE>() as u32)
-            == u32::MAX
-            || count > 4096
-        {
-            return None;
-        }
-        let mut devices = vec![RAWINPUTDEVICE::default(); count as usize];
-        let result = GetRegisteredRawInputDevices(
-            Some(devices.as_mut_ptr()),
-            &mut count,
-            size_of::<RAWINPUTDEVICE>() as u32,
-        );
-        if result == u32::MAX || count as usize > devices.len() {
-            None
-        } else {
-            devices.truncate(result as usize);
-            Some(devices)
-        }
-    }
-}
-fn owns(hwnd: HWND, usage: u16) -> bool {
-    registered().is_some_and(|d| {
-        d.iter().any(|d| {
-            d.usUsagePage == 1
-                && d.usUsage == usage
-                && d.hwndTarget == hwnd
-                && d.dwFlags == (RIDEV_INPUTSINK | RIDEV_DEVNOTIFY)
+fn registered() -> Result<Vec<RAWINPUTDEVICE>, Failure> {
+    read_raw_input_registrations(|buffer: Option<&mut [RAWINPUTDEVICE]>| unsafe {
+        let probe = buffer.is_none();
+        let mut count = buffer.as_ref().map_or(0, |buffer| buffer.len() as u32);
+        let pointer = buffer.map(|buffer| buffer.as_mut_ptr());
+        let copied =
+            GetRegisteredRawInputDevices(pointer, &mut count, size_of::<RAWINPUTDEVICE>() as u32);
+        // The null size probe normally returns -1/ERROR_INSUFFICIENT_BUFFER. Capture a real
+        // failure immediately; GetLastError after a successful call may contain an unrelated error.
+        let error = (copied == u32::MAX).then(|| GetLastError());
+        registration_read(
+            copied,
+            count,
+            probe,
+            error == Some(ERROR_INSUFFICIENT_BUFFER),
+        )
+        .ok_or_else(|| {
+            failure(format!(
+                "Cannot query Awake's Raw Input registrations (Windows error {})",
+                error.map_or(0, |error| error.0)
+            ))
         })
+    })
+}
+fn owns(devices: &[RAWINPUTDEVICE], hwnd: HWND, usage: u16) -> bool {
+    devices.iter().any(|d| {
+        d.usUsagePage == 1
+            && d.usUsage == usage
+            && d.hwndTarget == hwnd
+            && d.dwFlags == (RIDEV_INPUTSINK | RIDEV_DEVNOTIFY)
     })
 }
 unsafe fn read_input(context: &mut Context, lparam: LPARAM) {
@@ -493,12 +492,12 @@ pub fn start(router: Arc<InputRouter>) -> Arc<dyn InputSession> {
             let _dpi = Dpi::enter()?;
             desktop_active()?;
             unsafe {
-                if registered().is_none_or(|d| {
-                    d.iter()
-                        .any(|d| d.usUsagePage == 1 && [2, 6].contains(&d.usUsage))
-                }) {
+                if registered()?
+                    .iter()
+                    .any(|d| d.usUsagePage == 1 && [2, 6].contains(&d.usUsage))
+                {
                     return Err(failure(
-                        "Another component owns mouse or keyboard Raw Input",
+                        "Another component inside Awake already owns mouse or keyboard Raw Input. Restart Awake and retry",
                     ));
                 }
                 let instance = GetModuleHandleW(None).map_err(native_error)?;
@@ -566,7 +565,14 @@ pub fn start(router: Arc<InputRouter>) -> Arc<dyn InputSession> {
                             let _ = TranslateMessage(&message);
                             DispatchMessageW(&message);
                         }
-                        if !owns(hwnd, 2) || !owns(hwnd, 6) {
+                        let registrations = match registered() {
+                            Ok(devices) => devices,
+                            Err(error) => {
+                                return_cleanup_error(&owner, error);
+                                break;
+                            }
+                        };
+                        if !owns(&registrations, hwnd, 2) || !owns(&registrations, hwnd, 6) {
                             return_cleanup_error(
                                 &owner,
                                 failure("Raw Input registration ownership was lost"),
@@ -593,8 +599,15 @@ pub fn start(router: Arc<InputRouter>) -> Arc<dyn InputSession> {
                         thread::sleep(Duration::from_millis(25));
                     }
                 }
+                let registrations = match registered() {
+                    Ok(devices) => devices,
+                    Err(error) => {
+                        *owner.cleanup_failure.lock().expect("cleanup") = Some(error);
+                        Vec::new()
+                    }
+                };
                 for usage in [2u16, 6] {
-                    if owns(hwnd, usage) {
+                    if owns(&registrations, hwnd, usage) {
                         if let Err(error) = RegisterRawInputDevices(
                             &[RAWINPUTDEVICE {
                                 usUsagePage: 1,
