@@ -75,6 +75,13 @@ pub fn read_raw_input_registrations<T: Default + Clone>(
     ))
 }
 
+/// Windows reports an INPUTSINK|DEVNOTIFY registration back as INPUTSINK alone (observed on
+/// Windows 11 build 26200), so ownership accepts the sink flag with or without the notify flag.
+#[cfg(any(windows, test))]
+pub fn sink_registration_flags(reported: u32, sink: u32, notify: u32) -> bool {
+    reported & !notify == sink
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeDisplay {
     pub identity: String,

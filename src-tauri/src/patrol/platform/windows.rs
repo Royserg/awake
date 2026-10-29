@@ -357,7 +357,7 @@ fn owns(devices: &[RAWINPUTDEVICE], hwnd: HWND, usage: u16) -> bool {
         d.usUsagePage == 1
             && d.usUsage == usage
             && d.hwndTarget == hwnd
-            && d.dwFlags == (RIDEV_INPUTSINK | RIDEV_DEVNOTIFY)
+            && sink_registration_flags(d.dwFlags.0, RIDEV_INPUTSINK.0, RIDEV_DEVNOTIFY.0)
     })
 }
 unsafe fn read_input(context: &mut Context, lparam: LPARAM) {

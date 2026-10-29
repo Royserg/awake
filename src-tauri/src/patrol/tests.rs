@@ -1416,3 +1416,17 @@ fn windows_registration_enumeration_is_bounded_and_rejects_invalid_counts() {
         .is_err()
     );
 }
+
+#[test]
+fn windows_sink_ownership_accepts_reported_flags_without_devnotify() {
+    use super::platform::sink_registration_flags;
+    const SINK: u32 = 0x100;
+    const NOTIFY: u32 = 0x2000;
+    // Windows reports the INPUTSINK|DEVNOTIFY registration as INPUTSINK alone.
+    assert!(sink_registration_flags(SINK, SINK, NOTIFY));
+    assert!(sink_registration_flags(SINK | NOTIFY, SINK, NOTIFY));
+    // Tao's focused-only registration, a cleared sink and any extra mode flag are not ours.
+    assert!(!sink_registration_flags(NOTIFY, SINK, NOTIFY));
+    assert!(!sink_registration_flags(0, SINK, NOTIFY));
+    assert!(!sink_registration_flags(SINK | 0x30, SINK, NOTIFY));
+}
